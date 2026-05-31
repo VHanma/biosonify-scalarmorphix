@@ -42,7 +42,7 @@
     "expo-haptics": "~15.0.8",
     "expo-image": "~3.0.11",
     "expo-image-manipulator": "^56.0.16",
-    "expo-image-picker": "^56.0.15",
+    "expo-image-picker": "^16.0.6",
     "expo-keep-awake": "~15.0.8",
     "expo-linking": "~8.0.10",
     "expo-notifications": "~0.32.15",

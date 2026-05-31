@@ -44,7 +44,7 @@ export default function HomeScreen() {
     if (requesting) return;
     setRequesting(true);
     try {
-      if (Platform.OS !== "web") {
+      if (Platform.OS === "android") {
         const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
         if (status !== "granted") {
           Alert.alert(
@@ -81,7 +81,7 @@ export default function HomeScreen() {
     if (requesting) return;
     setRequesting(true);
     try {
-      if (Platform.OS !== "web") {
+      if (Platform.OS === "android") {
         const { status } = await ImagePicker.requestCameraPermissionsAsync();
         if (status !== "granted") {
           Alert.alert("Permission needed", "Camera access is required to capture images.");
