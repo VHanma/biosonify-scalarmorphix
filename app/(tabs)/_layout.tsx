@@ -1,9 +1,9 @@
 import { Tabs } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { Platform } from "react-native";
 
 import { HapticTab } from "@/components/haptic-tab";
 import { IconSymbol } from "@/components/ui/icon-symbol";
-import { Platform } from "react-native";
 import { useColors } from "@/hooks/use-colors";
 
 export default function TabLayout() {
@@ -15,24 +15,49 @@ export default function TabLayout() {
   return (
     <Tabs
       screenOptions={{
-        tabBarActiveTintColor: colors.tint,
+        tabBarActiveTintColor: "#2ECC9A",
+        tabBarInactiveTintColor: "#7D8590",
         headerShown: false,
         tabBarButton: HapticTab,
         tabBarStyle: {
           paddingTop: 8,
           paddingBottom: bottomPadding,
           height: tabBarHeight,
-          backgroundColor: colors.background,
-          borderTopColor: colors.border,
+          backgroundColor: "#161B22",
+          borderTopColor: "#30363D",
           borderTopWidth: 0.5,
+        },
+        tabBarLabelStyle: {
+          fontSize: 11,
+          fontWeight: "600",
         },
       }}
     >
       <Tabs.Screen
         name="index"
         options={{
-          title: "Home",
-          tabBarIcon: ({ color }) => <IconSymbol size={28} name="house.fill" color={color} />,
+          title: "Sonify",
+          tabBarIcon: ({ color }) => (
+            <IconSymbol size={26} name="waveform" color={color} />
+          ),
+        }}
+      />
+      <Tabs.Screen
+        name="frequencies"
+        options={{
+          title: "Frequencies",
+          tabBarIcon: ({ color }) => (
+            <IconSymbol size={26} name="music.note.list" color={color} />
+          ),
+        }}
+      />
+      <Tabs.Screen
+        name="about"
+        options={{
+          title: "Theory",
+          tabBarIcon: ({ color }) => (
+            <IconSymbol size={26} name="atom" color={color} />
+          ),
         }}
       />
     </Tabs>
