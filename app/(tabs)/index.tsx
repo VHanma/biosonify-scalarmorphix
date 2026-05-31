@@ -1,114 +1,98 @@
-import { useState, useCallback } from "react";
+import { useCallback } from "react";
 import {
   View,
   Text,
   ScrollView,
   Pressable,
-  Image,
-  Dimensions,
-  Alert,
-  Platform,
   StyleSheet,
-  ActivityIndicator,
+  Image,
+  FlatList,
+  Platform,
+  Alert,
+  Dimensions,
 } from "react-native";
-import * as ImagePicker from "expo-image-picker";
 import { useRouter } from "expo-router";
+import * as ImagePicker from "expo-image-picker";
 import { ScreenContainer } from "@/components/screen-container";
 import { IconSymbol } from "@/components/ui/icon-symbol";
 import { useSonification } from "@/lib/sonification-store";
 
 const { width: SCREEN_W } = Dimensions.get("window");
-const BAR_COUNT = 40;
 
-/**
- * Static waveform bars derived from a deterministic sine pattern.
- * These represent the shape of a 528 Hz Solfeggio wave sampled at BAR_COUNT points.
- * No randomness — this is a real waveform, not decoration.
- */
-const STATIC_BARS = Array.from({ length: BAR_COUNT }, (_, i) => {
-  const t = i / BAR_COUNT;
-  // Superposition of 396, 528, 741 Hz Solfeggio waves sampled at equal intervals
-  const v =
-    0.4 * Math.abs(Math.sin(2 * Math.PI * 396 * t)) +
-    0.35 * Math.abs(Math.sin(2 * Math.PI * 528 * t)) +
-    0.25 * Math.abs(Math.sin(2 * Math.PI * 741 * t));
-  return Math.min(1, v / 1.0);
+// ── Deterministic waveform hero ─────────────────────────────────────────────
+// These values are computed from the three primary Solfeggio carriers:
+// 396 Hz (UT), 528 Hz (MI), 741 Hz (SOL) sampled at 24 evenly-spaced phase points.
+// No randomness — same values every render.
+const HERO_BARS = Array.from({ length: 24 }, (_, i) => {
+  const t = i / 24;
+  const a = Math.sin(2 * Math.PI * 396 * t) * 0.4;
+  const b = Math.sin(2 * Math.PI * 528 * t) * 0.35;
+  const c = Math.sin(2 * Math.PI * 741 * t) * 0.25;
+  return Math.abs(a + b + c);
 });
+const heroMax = Math.max(...HERO_BARS);
+const HERO_NORMALIZED = HERO_BARS.map((v) => v / heroMax);
 
 export default function HomeScreen() {
   const router = useRouter();
   const { state, dispatch } = useSonification();
-  const [requesting, setRequesting] = useState(false);
 
-  const pickImage = useCallback(async () => {
-    if (requesting) return;
-    setRequesting(true);
-    try {
-      if (Platform.OS === "android") {
-        const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
-        if (status !== "granted") {
-          Alert.alert(
-            "Permission needed",
-            "BioSonify needs access to your photo library to sonify images."
-          );
-          return;
-        }
+  const pickFromLibrary = useCallback(async () => {
+    if (Platform.OS === "android") {
+      const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (status !== "granted") {
+        Alert.alert(
+          "Permission required",
+          "BioSonify needs access to your photo library to select images for sonification."
+        );
+        return;
       }
-
-      const result = await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: ["images"],
-        allowsEditing: false,
-        quality: 1,
-      });
-
-      if (!result.canceled && result.assets.length > 0) {
-        const asset = result.assets[0];
-        dispatch({
-          type: "SET_IMAGE",
-          uri: asset.uri,
-          width: asset.width ?? 0,
-          height: asset.height ?? 0,
-        });
-        dispatch({ type: "ADD_RECENT", uri: asset.uri });
-        router.push("/sonify" as any);
-      }
-    } finally {
-      setRequesting(false);
     }
-  }, [requesting, dispatch, router]);
-
-  const takePhoto = useCallback(async () => {
-    if (requesting) return;
-    setRequesting(true);
-    try {
-      if (Platform.OS === "android") {
-        const { status } = await ImagePicker.requestCameraPermissionsAsync();
-        if (status !== "granted") {
-          Alert.alert("Permission needed", "Camera access is required to capture images.");
-          return;
-        }
-      }
-
-      const result = await ImagePicker.launchCameraAsync({
-        allowsEditing: false,
-        quality: 1,
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: "images",
+      allowsEditing: false,
+      quality: 1,
+    });
+    if (!result.canceled && result.assets[0]) {
+      const asset = result.assets[0];
+      dispatch({
+        type: "SET_IMAGE",
+        uri: asset.uri,
+        width: asset.width ?? 0,
+        height: asset.height ?? 0,
       });
-
-      if (!result.canceled && result.assets.length > 0) {
-        const asset = result.assets[0];
-        dispatch({
-          type: "SET_IMAGE",
-          uri: asset.uri,
-          width: asset.width ?? 0,
-          height: asset.height ?? 0,
-        });
-        dispatch({ type: "ADD_RECENT", uri: asset.uri });
-        router.push("/sonify" as any);
-      }
-    } finally {
-      setRequesting(false);
+      dispatch({ type: "ADD_RECENT", uri: asset.uri });
+      router.push("/sonify" as any);
     }
-  }, [requesting, dispatch, router]);
+  }, [dispatch, router]);
+
+  const pickFromCamera = useCallback(async () => {
+    if (Platform.OS === "android") {
+      const { status } = await ImagePicker.requestCameraPermissionsAsync();
+      if (status !== "granted") {
+        Alert.alert(
+          "Permission required",
+          "BioSonify needs camera access to capture images for sonification."
+        );
+        return;
+      }
+    }
+    const result = await ImagePicker.launchCameraAsync({
+      allowsEditing: false,
+      quality: 1,
+    });
+    if (!result.canceled && result.assets[0]) {
+      const asset = result.assets[0];
+      dispatch({
+        type: "SET_IMAGE",
+        uri: asset.uri,
+        width: asset.width ?? 0,
+        height: asset.height ?? 0,
+      });
+      dispatch({ type: "ADD_RECENT", uri: asset.uri });
+      router.push("/sonify" as any);
+    }
+  }, [dispatch, router]);
 
   const openRecent = useCallback(
     (uri: string) => {
@@ -121,217 +105,275 @@ export default function HomeScreen() {
   return (
     <ScreenContainer containerClassName="bg-background" className="bg-background">
       <ScrollView
-        contentContainerStyle={{ flexGrow: 1, paddingBottom: 24 }}
+        contentContainerStyle={{ flexGrow: 1, paddingBottom: 32 }}
         showsVerticalScrollIndicator={false}
       >
-        {/* ── Hero ─────────────────────────────────────────────────────── */}
-        <View style={styles.hero}>
-          <Text style={styles.appTitle}>BioSonify</Text>
-          <Text style={styles.appSubtitle}>
-            Transform images into living sound
-          </Text>
+        {/* ── Header ──────────────────────────────────────────────────────── */}
+        <View style={styles.header}>
+          <View>
+            <Text style={styles.appName}>BioSonify</Text>
+            <Text style={styles.tagline}>Image → Sound · Every pixel encoded</Text>
+          </View>
+          <View style={styles.headerBadge}>
+            <IconSymbol name="dna" size={18} color="#2ECC9A" />
+          </View>
+        </View>
 
-          {/* Static Solfeggio waveform — superposition of 396 + 528 + 741 Hz */}
-          <View style={styles.waveformContainer}>
-            {STATIC_BARS.map((height, i) => (
+        {/* ── Waveform hero ────────────────────────────────────────────────── */}
+        <View style={styles.heroCard}>
+          <View style={styles.heroWave}>
+            {HERO_NORMALIZED.map((v, i) => (
               <View
                 key={i}
                 style={[
-                  styles.waveBar,
-                  {
-                    height: 4 + height * 52,
-                    backgroundColor:
-                      i % 3 === 0 ? "#2ECC9A" : i % 3 === 1 ? "#F0A500" : "#1A6B5A",
-                  },
+                  styles.heroBar,
+                  { height: Math.max(4, v * 48), opacity: 0.6 + v * 0.4 },
                 ]}
               />
             ))}
           </View>
-
-          <Text style={styles.tagline}>
-            396 · 528 · 741 Hz Solfeggio superposition
+          <Text style={styles.heroLabel}>396 · 528 · 741 Hz — Solfeggio carriers</Text>
+          <Text style={styles.heroSub}>
+            Tap an image source below to translate its full pixel data into sound
           </Text>
         </View>
 
-        {/* ── Action Buttons ────────────────────────────────────────────── */}
-        <View style={styles.buttonRow}>
+        {/* ── Image source buttons ─────────────────────────────────────────── */}
+        <View style={styles.sourceRow}>
           <Pressable
-            style={({ pressed }) => [styles.primaryBtn, pressed && styles.pressed]}
-            onPress={pickImage}
-            disabled={requesting}
+            style={({ pressed }) => [styles.sourceBtn, pressed && { opacity: 0.75 }]}
+            onPress={pickFromLibrary}
           >
-            {requesting ? (
-              <ActivityIndicator color="#0D1117" size="small" />
-            ) : (
-              <>
-                <IconSymbol name="photo.fill" size={22} color="#0D1117" />
-                <Text style={styles.primaryBtnText}>Pick Image</Text>
-              </>
-            )}
-          </Pressable>
-
-          <Pressable
-            style={({ pressed }) => [styles.secondaryBtn, pressed && styles.pressed]}
-            onPress={takePhoto}
-            disabled={requesting}
-          >
-            <IconSymbol name="camera.fill" size={22} color="#2ECC9A" />
-            <Text style={styles.secondaryBtnText}>Camera</Text>
-          </Pressable>
-        </View>
-
-        {/* ── Mode cards ───────────────────────────────────────────────── */}
-        <View style={styles.modeCards}>
-          {[
-            {
-              color: "#2ECC9A",
-              title: "Spectral Scan",
-              desc: "Pixel brightness → pitch · hue → timbre · saturation → harmonics",
-            },
-            {
-              color: "#F0A500",
-              title: "Wave Genetics",
-              desc: "R→396 Hz · G→528 Hz · B→741 Hz · luminance→40 Hz coherence carrier",
-            },
-            {
-              color: "#4A9EFF",
-              title: "Biofield Overlay",
-              desc: "Spectral base + pixel-driven Schumann / Rife / Solfeggio carriers",
-            },
-          ].map((m) => (
-            <View
-              key={m.title}
-              style={[styles.modeCard, { borderLeftColor: m.color }]}
-            >
-              <Text style={[styles.modeCardTitle, { color: m.color }]}>{m.title}</Text>
-              <Text style={styles.modeCardDesc}>{m.desc}</Text>
+            <View style={[styles.sourceBtnIcon, { backgroundColor: "#2ECC9A22" }]}>
+              <IconSymbol name="photo.fill" size={26} color="#2ECC9A" />
             </View>
-          ))}
+            <Text style={styles.sourceBtnTitle}>Photo Library</Text>
+            <Text style={styles.sourceBtnDesc}>Select any image</Text>
+          </Pressable>
+
+          <Pressable
+            style={({ pressed }) => [styles.sourceBtn, pressed && { opacity: 0.75 }]}
+            onPress={pickFromCamera}
+          >
+            <View style={[styles.sourceBtnIcon, { backgroundColor: "#F0A50022" }]}>
+              <IconSymbol name="camera.fill" size={26} color="#F0A500" />
+            </View>
+            <Text style={styles.sourceBtnTitle}>Camera</Text>
+            <Text style={styles.sourceBtnDesc}>Capture live</Text>
+          </Pressable>
         </View>
 
-        {/* ── Recent images ─────────────────────────────────────────────── */}
-        {state.recentImages.length > 0 && (
-          <View style={styles.recentSection}>
-            <Text style={styles.recentTitle}>Recent</Text>
-            <ScrollView horizontal showsHorizontalScrollIndicator={false}>
-              {state.recentImages.map((r) => (
-                <Pressable
-                  key={r.uri}
-                  style={({ pressed }) => [
-                    styles.recentThumb,
-                    pressed && { opacity: 0.7 },
-                  ]}
-                  onPress={() => openRecent(r.uri)}
-                >
-                  <Image
-                    source={{ uri: r.uri }}
-                    style={styles.recentImg}
-                    resizeMode="cover"
-                  />
-                </Pressable>
-              ))}
-            </ScrollView>
+        {/* ── Mode cards ───────────────────────────────────────────────────── */}
+        <Text style={styles.sectionTitle}>Synthesis Modes</Text>
+        <View style={styles.modeCards}>
+          <View style={[styles.modeCard, { borderColor: "#2ECC9A55" }]}>
+            <Text style={[styles.modeCardTitle, { color: "#2ECC9A" }]}>Spectral</Text>
+            <Text style={styles.modeCardDesc}>
+              Brightness → pitch · Hue → timbre · Saturation → harmonics · X/Y → time/octave
+            </Text>
           </View>
+          <View style={[styles.modeCard, { borderColor: "#F0A50055" }]}>
+            <Text style={[styles.modeCardTitle, { color: "#F0A500" }]}>Wave Genetics</Text>
+            <Text style={styles.modeCardDesc}>
+              R→396 Hz · G→528 Hz · B→741 Hz · Luminance→40 Hz coherence · Gariaev He-Ne laser equivalent at 13,788 Hz
+            </Text>
+          </View>
+          <View style={[styles.modeCard, { borderColor: "#4A9EFF55" }]}>
+            <Text style={[styles.modeCardTitle, { color: "#4A9EFF" }]}>Biofield</Text>
+            <Text style={styles.modeCardDesc}>
+              Full spectral scan + pixel data drives amplitude and phase of all active biofield carriers from the frequency library
+            </Text>
+          </View>
+        </View>
+
+        {/* ── Recent images ────────────────────────────────────────────────── */}
+        {state.recentImages.length > 0 && (
+          <>
+            <Text style={styles.sectionTitle}>Recent Images</Text>
+            <FlatList
+              horizontal
+              data={state.recentImages}
+              keyExtractor={(item) => item.uri}
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={styles.recentList}
+              renderItem={({ item }) => (
+                <Pressable
+                  style={({ pressed }) => [styles.recentItem, pressed && { opacity: 0.75 }]}
+                  onPress={() => openRecent(item.uri)}
+                >
+                  <Image source={{ uri: item.uri }} style={styles.recentImage} />
+                  <View style={styles.recentOverlay}>
+                    <IconSymbol name="play.fill" size={16} color="#fff" />
+                  </View>
+                </Pressable>
+              )}
+            />
+          </>
         )}
+
+        {/* ── Stats bar ────────────────────────────────────────────────────── */}
+        <View style={styles.statsRow}>
+          <View style={styles.statItem}>
+            <Text style={styles.statValue}>565</Text>
+            <Text style={styles.statLabel}>Frequencies</Text>
+          </View>
+          <View style={styles.statDivider} />
+          <View style={styles.statItem}>
+            <Text style={styles.statValue}>8</Text>
+            <Text style={styles.statLabel}>Categories</Text>
+          </View>
+          <View style={styles.statDivider} />
+          <View style={styles.statItem}>
+            <Text style={styles.statValue}>3</Text>
+            <Text style={styles.statLabel}>Engines</Text>
+          </View>
+          <View style={styles.statDivider} />
+          <View style={styles.statItem}>
+            <Text style={styles.statValue}>0</Text>
+            <Text style={styles.statLabel}>Random bits</Text>
+          </View>
+        </View>
       </ScrollView>
     </ScreenContainer>
   );
 }
 
 const styles = StyleSheet.create({
-  hero: {
-    alignItems: "center",
-    paddingTop: 32,
-    paddingBottom: 24,
-    paddingHorizontal: 16,
-  },
-  appTitle: {
-    fontSize: 34,
-    fontWeight: "900",
-    color: "#E6EDF3",
-    letterSpacing: -0.5,
-  },
-  appSubtitle: {
-    fontSize: 14,
-    color: "#7D8590",
-    marginTop: 4,
-    marginBottom: 20,
-  },
-  waveformContainer: {
+  header: {
     flexDirection: "row",
     alignItems: "center",
-    height: 60,
-    gap: 2,
-    marginBottom: 8,
-  },
-  waveBar: {
-    width: Math.floor((SCREEN_W - 32 - BAR_COUNT * 2) / BAR_COUNT),
-    borderRadius: 2,
-    minHeight: 4,
-  },
-  tagline: {
-    fontSize: 11,
-    color: "#7D8590",
-    fontStyle: "italic",
-    marginTop: 4,
-  },
-  buttonRow: {
-    flexDirection: "row",
-    gap: 12,
-    paddingHorizontal: 16,
-    marginBottom: 24,
-  },
-  primaryBtn: {
-    flex: 1,
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: 8,
-    backgroundColor: "#2ECC9A",
-    paddingVertical: 14,
-    borderRadius: 14,
-  },
-  secondaryBtn: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: 8,
-    backgroundColor: "#161B22",
-    paddingVertical: 14,
+    justifyContent: "space-between",
     paddingHorizontal: 20,
-    borderRadius: 14,
-    borderWidth: 1,
-    borderColor: "#2ECC9A",
+    paddingTop: 16,
+    paddingBottom: 12,
   },
-  primaryBtnText: { fontSize: 16, fontWeight: "700", color: "#0D1117" },
-  secondaryBtnText: { fontSize: 16, fontWeight: "700", color: "#2ECC9A" },
-  pressed: { opacity: 0.8, transform: [{ scale: 0.97 }] },
-  modeCards: { paddingHorizontal: 16, gap: 10, marginBottom: 24 },
-  modeCard: {
+  appName: { fontSize: 28, fontWeight: "900", color: "#E6EDF3", letterSpacing: -0.5 },
+  tagline: { fontSize: 12, color: "#7D8590", marginTop: 2 },
+  headerBadge: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
     backgroundColor: "#161B22",
-    borderRadius: 12,
+    alignItems: "center",
+    justifyContent: "center",
+    borderWidth: 1,
+    borderColor: "#2ECC9A44",
+  },
+  heroCard: {
+    marginHorizontal: 16,
+    backgroundColor: "#161B22",
+    borderRadius: 18,
+    padding: 20,
+    marginBottom: 20,
     borderWidth: 1,
     borderColor: "#30363D",
-    borderLeftWidth: 3,
-    padding: 14,
+    alignItems: "center",
   },
-  modeCardTitle: { fontSize: 13, fontWeight: "700", marginBottom: 4 },
-  modeCardDesc: { fontSize: 12, color: "#7D8590", lineHeight: 17 },
-  recentSection: { paddingHorizontal: 16 },
-  recentTitle: {
-    fontSize: 14,
-    fontWeight: "700",
-    color: "#E6EDF3",
+  heroWave: {
+    flexDirection: "row",
+    alignItems: "center",
+    height: 56,
+    gap: 3,
     marginBottom: 10,
   },
-  recentThumb: {
-    width: 72,
-    height: 72,
-    borderRadius: 10,
-    overflow: "hidden",
-    marginRight: 10,
+  heroBar: {
+    width: 8,
+    borderRadius: 4,
+    backgroundColor: "#2ECC9A",
+  },
+  heroLabel: {
+    fontSize: 11,
+    color: "#2ECC9A",
+    fontWeight: "600",
+    marginBottom: 6,
+    letterSpacing: 0.5,
+  },
+  heroSub: {
+    fontSize: 12,
+    color: "#7D8590",
+    textAlign: "center",
+    lineHeight: 17,
+  },
+  sourceRow: {
+    flexDirection: "row",
+    paddingHorizontal: 16,
+    gap: 12,
+    marginBottom: 28,
+  },
+  sourceBtn: {
+    flex: 1,
+    backgroundColor: "#161B22",
+    borderRadius: 18,
+    padding: 18,
+    alignItems: "center",
+    gap: 8,
     borderWidth: 1,
     borderColor: "#30363D",
   },
-  recentImg: { width: "100%", height: "100%" },
+  sourceBtnIcon: {
+    width: 52,
+    height: 52,
+    borderRadius: 26,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  sourceBtnTitle: { fontSize: 15, fontWeight: "700", color: "#E6EDF3" },
+  sourceBtnDesc: { fontSize: 11, color: "#7D8590" },
+  sectionTitle: {
+    fontSize: 13,
+    fontWeight: "700",
+    color: "#7D8590",
+    paddingHorizontal: 20,
+    marginBottom: 10,
+    textTransform: "uppercase",
+    letterSpacing: 0.8,
+  },
+  modeCards: {
+    paddingHorizontal: 16,
+    gap: 10,
+    marginBottom: 28,
+  },
+  modeCard: {
+    backgroundColor: "#161B22",
+    borderRadius: 14,
+    padding: 14,
+    borderWidth: 1,
+    gap: 4,
+  },
+  modeCardTitle: { fontSize: 14, fontWeight: "700" },
+  modeCardDesc: { fontSize: 12, color: "#7D8590", lineHeight: 17 },
+  recentList: {
+    paddingHorizontal: 16,
+    gap: 10,
+    marginBottom: 28,
+  },
+  recentItem: {
+    width: 80,
+    height: 80,
+    borderRadius: 12,
+    overflow: "hidden",
+    backgroundColor: "#161B22",
+  },
+  recentImage: { width: "100%", height: "100%" },
+  recentOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: "rgba(0,0,0,0.35)",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  statsRow: {
+    flexDirection: "row",
+    marginHorizontal: 16,
+    backgroundColor: "#161B22",
+    borderRadius: 14,
+    padding: 16,
+    borderWidth: 1,
+    borderColor: "#30363D",
+    alignItems: "center",
+    justifyContent: "space-around",
+  },
+  statItem: { alignItems: "center", flex: 1 },
+  statValue: { fontSize: 20, fontWeight: "800", color: "#2ECC9A" },
+  statLabel: { fontSize: 10, color: "#7D8590", marginTop: 2 },
+  statDivider: { width: 1, height: 32, backgroundColor: "#30363D" },
 });

@@ -38,3 +38,17 @@
 - [x] Remove idle waveform animation — waveform only shows real synthesized data
 - [x] Fix dev server port conflict
 - [x] Re-run all tests after engine rebuild
+
+## Frequency Library Expansion & Save System (v5)
+
+- [x] Research and add DNA-influencing frequencies (Rife, Solfeggio, electromagnetic DNA repair)
+- [x] Research and add Gariaev neon-helium laser frequency translated to audio equivalent
+- [x] Research and add organ/body-part resonance frequencies (heart, liver, brain, kidneys, etc.)
+- [x] Research and add superhuman trait frequencies (Type IIX muscle fiber, neuroplasticity, mitochondrial, telomere, HGH, etc.)
+- [x] Expand FREQUENCY_LIBRARY with 565 entries across 8 categories
+- [x] Save individual WAV: save the currently synthesized audio as a standalone file
+- [x] Save combined WAV: mix all active frequency tones into one WAV
+- [x] Save stacked WAV: image sonification + all active frequencies layered together
+- [x] Integrate expo-media-library to save WAV directly to device music library
+- [ ] Add save history screen (future enhancement)
+- [x] Add share button on save screen (share via system share sheet)

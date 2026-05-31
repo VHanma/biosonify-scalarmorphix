@@ -11,10 +11,10 @@ import {
   Platform,
   Alert,
   ActivityIndicator,
+  Modal,
 } from "react-native";
 import { useRouter } from "expo-router";
 import * as FileSystem from "expo-file-system/legacy";
-import * as Sharing from "expo-sharing";
 import { setAudioModeAsync, useAudioPlayer } from "expo-audio";
 import { ScreenContainer } from "@/components/screen-container";
 import { IconSymbol } from "@/components/ui/icon-symbol";
@@ -27,6 +27,11 @@ import {
   extractWaveformBars,
   type SonificationMode,
 } from "@/lib/sonification-engine";
+import {
+  saveIndividualSonification,
+  saveCombinedTones,
+  saveStackedOutput,
+} from "@/lib/save-audio";
 
 const { width: SCREEN_W } = Dimensions.get("window");
 const BAR_COUNT = 50;
@@ -45,17 +50,14 @@ const MODE_COLORS: Record<SonificationMode, string> = {
 
 const MODE_DESCRIPTIONS: Record<SonificationMode, string> = {
   SPECTRAL:
-    "Every pixel: brightness → pitch · hue → timbre · saturation → harmonics · position → time",
+    "Every pixel: brightness→pitch · hue→timbre · saturation→harmonics · position→time",
   WAVE_GENETICS:
     "Every pixel: R→396 Hz · G→528 Hz · B→741 Hz · luminance→40 Hz coherence · X→phase · Y→detune",
   BIOFIELD:
     "Full spectral scan + pixel-driven biofield carriers (amplitude & phase from image data)",
 };
 
-/**
- * Write WAV ArrayBuffer to a cache file and return a file:// URI.
- * On web, returns a data: URI instead (file system not available).
- */
+/** Write WAV ArrayBuffer to a cache file and return a file:// URI (or data: on web). */
 async function writeWavToFile(wavBuffer: ArrayBuffer): Promise<string> {
   if (Platform.OS === "web") {
     const base64 = arrayBufferToBase64(wavBuffer);
@@ -66,16 +68,18 @@ async function writeWavToFile(wavBuffer: ArrayBuffer): Promise<string> {
   await FileSystem.writeAsStringAsync(path, base64, {
     encoding: FileSystem.EncodingType.Base64,
   });
-  return path; // file:// URI — works on Android and iOS
+  return path;
 }
 
 export default function SonifyScreen() {
   const router = useRouter();
-  const { state, dispatch, getEnabledHz } = useSonification();
+  const { state, dispatch, getEnabledFrequencies, getEnabledHz } = useSonification();
   const { extractPixels, isExtracting } = useImagePixels();
   const [scanPos] = useState(new Animated.Value(0));
   const scanAnim = useRef<Animated.CompositeAnimation | null>(null);
   const player = useAudioPlayer(null);
+  const [showSaveMenu, setShowSaveMenu] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
 
   // Waveform bar animated values — only updated from real synthesis data
   const barAnims = useRef(
@@ -96,49 +100,33 @@ export default function SonifyScreen() {
       });
     } else {
       barAnims.forEach((anim) => {
-        Animated.timing(anim, {
-          toValue: 0,
-          duration: 200,
-          useNativeDriver: false,
-        }).start();
+        Animated.timing(anim, { toValue: 0, duration: 200, useNativeDriver: false }).start();
       });
     }
   }, [state.waveformBars]);
 
-  // Setup audio mode — correct option name is playsInSilentMode (not playsInSilentModeIOS)
   useEffect(() => {
     setAudioModeAsync({ playsInSilentMode: true }).catch(() => {});
-    return () => {
-      player.release();
-    };
+    return () => { player.release(); };
   }, []);
 
   const synthesize = useCallback(async () => {
     if (!state.imageUri) return;
     dispatch({ type: "SET_PROCESSING", processing: true });
-
     try {
       const { pixels, width, height } = await extractPixels(state.imageUri);
       const enabledHz = getEnabledHz();
-
       const samples = synthesizeFromPixels(pixels, width, height, {
         mode: state.mode,
         durationSeconds: state.durationSeconds,
         carrierFrequencies: enabledHz,
         sampleRate: 44100,
       });
-
       const wavBuffer = encodeWav(samples, 44100);
-
-      // Write to file:// path on native (data: URIs don't work on Android)
       const audioUri = await writeWavToFile(wavBuffer);
-
-      // For waveform display and export, keep base64 in state
       const base64 = arrayBufferToBase64(wavBuffer);
       const dataUri = `data:audio/wav;base64,${base64}`;
       const bars = extractWaveformBars(samples, BAR_COUNT);
-
-      // Store both: dataUri for export/web, audioUri (file://) for native playback
       dispatch({ type: "SET_AUDIO", dataUri, audioUri, waveformBars: bars });
     } catch (e) {
       dispatch({ type: "SET_PROCESSING", processing: false });
@@ -155,7 +143,6 @@ export default function SonifyScreen() {
       player.replace({ uri: state.audioUri });
       player.play();
       dispatch({ type: "SET_PLAYING", playing: true });
-
       scanPos.setValue(0);
       scanAnim.current = Animated.timing(scanPos, {
         toValue: 1,
@@ -186,40 +173,56 @@ export default function SonifyScreen() {
     dispatch({ type: "SET_PLAYING", playing: false });
   }, [player, dispatch]);
 
-  const handleExport = useCallback(async () => {
+  // ── Save handlers ────────────────────────────────────────────────────────────
+
+  const handleSaveIndividual = useCallback(async () => {
     if (!state.audioDataUri) {
       Alert.alert("No audio", "Synthesize audio first by pressing Play.");
       return;
     }
+    setIsSaving(true);
+    setShowSaveMenu(false);
     try {
-      if (Platform.OS === "web") {
-        const a = document.createElement("a");
-        a.href = state.audioDataUri;
-        a.download = "biosonify-output.wav";
-        a.click();
-      } else {
-        const path = (FileSystem.cacheDirectory ?? "") + "biosonify-export.wav";
-        const base64 = state.audioDataUri.replace("data:audio/wav;base64,", "");
-        await FileSystem.writeAsStringAsync(path, base64, {
-          encoding: FileSystem.EncodingType.Base64,
-        });
-        if (await Sharing.isAvailableAsync()) {
-          await Sharing.shareAsync(path, { mimeType: "audio/wav" });
-        } else {
-          Alert.alert("Saved", "Audio saved to cache: " + path);
-        }
-      }
+      await saveIndividualSonification(
+        state.audioDataUri,
+        `BioSonify_${state.mode}_${state.durationSeconds}s`
+      );
     } catch (e) {
-      Alert.alert("Export failed", String(e));
+      Alert.alert("Save failed", String(e));
+    } finally {
+      setIsSaving(false);
     }
-  }, [state.audioDataUri]);
+  }, [state.audioDataUri, state.mode, state.durationSeconds]);
 
-  const setMode = useCallback(
-    (mode: SonificationMode) => {
-      dispatch({ type: "SET_MODE", mode });
-    },
-    [dispatch]
-  );
+  const handleSaveCombined = useCallback(async () => {
+    const enabled = getEnabledFrequencies();
+    setIsSaving(true);
+    setShowSaveMenu(false);
+    try {
+      await saveCombinedTones(enabled, state.durationSeconds);
+    } catch (e) {
+      Alert.alert("Save failed", String(e));
+    } finally {
+      setIsSaving(false);
+    }
+  }, [getEnabledFrequencies, state.durationSeconds]);
+
+  const handleSaveStacked = useCallback(async () => {
+    if (!state.audioDataUri) {
+      Alert.alert("No audio", "Synthesize audio first by pressing Play.");
+      return;
+    }
+    const enabled = getEnabledFrequencies();
+    setIsSaving(true);
+    setShowSaveMenu(false);
+    try {
+      await saveStackedOutput(state.audioDataUri, enabled, state.durationSeconds);
+    } catch (e) {
+      Alert.alert("Save failed", String(e));
+    } finally {
+      setIsSaving(false);
+    }
+  }, [state.audioDataUri, getEnabledFrequencies, state.durationSeconds]);
 
   const imageAreaW = SCREEN_W - 32;
   const imageAreaH = Math.round(imageAreaW * 0.6);
@@ -227,10 +230,10 @@ export default function SonifyScreen() {
   return (
     <ScreenContainer containerClassName="bg-background" className="bg-background">
       <ScrollView
-        contentContainerStyle={{ flexGrow: 1, paddingBottom: 32 }}
+        contentContainerStyle={{ flexGrow: 1, paddingBottom: 40 }}
         showsVerticalScrollIndicator={false}
       >
-        {/* ── Header ─────────────────────────────────────────────────────── */}
+        {/* ── Header ──────────────────────────────────────────────────────── */}
         <View style={styles.header}>
           <Pressable
             style={({ pressed }) => [styles.iconBtn, pressed && { opacity: 0.6 }]}
@@ -240,14 +243,24 @@ export default function SonifyScreen() {
           </Pressable>
           <Text style={styles.headerTitle}>Sonification Player</Text>
           <Pressable
-            style={({ pressed }) => [styles.iconBtn, pressed && { opacity: 0.6 }]}
-            onPress={handleExport}
+            style={({ pressed }) => [
+              styles.iconBtn,
+              styles.saveHeaderBtn,
+              pressed && { opacity: 0.6 },
+              isSaving && { opacity: 0.4 },
+            ]}
+            onPress={() => setShowSaveMenu(true)}
+            disabled={isSaving}
           >
-            <IconSymbol name="square.and.arrow.up" size={20} color="#2ECC9A" />
+            {isSaving ? (
+              <ActivityIndicator size={16} color="#2ECC9A" />
+            ) : (
+              <IconSymbol name="square.and.arrow.down" size={20} color="#2ECC9A" />
+            )}
           </Pressable>
         </View>
 
-        {/* ── Image + scan line ──────────────────────────────────────────── */}
+        {/* ── Image + scan line ────────────────────────────────────────────── */}
         <View style={[styles.imageBox, { width: imageAreaW, height: imageAreaH }]}>
           {state.imageUri ? (
             <>
@@ -285,7 +298,7 @@ export default function SonifyScreen() {
           )}
         </View>
 
-        {/* ── Waveform — real data only ──────────────────────────────────── */}
+        {/* ── Waveform — real data only ────────────────────────────────────── */}
         <View style={styles.waveformRow}>
           {barAnims.map((anim, i) => (
             <Animated.View
@@ -313,7 +326,7 @@ export default function SonifyScreen() {
             : "Waveform will appear after synthesis"}
         </Text>
 
-        {/* ── Mode selector ──────────────────────────────────────────────── */}
+        {/* ── Mode selector ────────────────────────────────────────────────── */}
         <View style={styles.modeRow}>
           {(["SPECTRAL", "WAVE_GENETICS", "BIOFIELD"] as SonificationMode[]).map((m) => (
             <Pressable
@@ -325,7 +338,7 @@ export default function SonifyScreen() {
                   borderColor: MODE_COLORS[m],
                 },
               ]}
-              onPress={() => setMode(m)}
+              onPress={() => dispatch({ type: "SET_MODE", mode: m })}
             >
               <Text
                 style={[
@@ -340,7 +353,7 @@ export default function SonifyScreen() {
         </View>
         <Text style={styles.modeDesc}>{MODE_DESCRIPTIONS[state.mode]}</Text>
 
-        {/* ── Playback controls ──────────────────────────────────────────── */}
+        {/* ── Playback controls ────────────────────────────────────────────── */}
         <View style={styles.controls}>
           <Pressable
             style={({ pressed }) => [styles.sideBtn, pressed && { opacity: 0.7 }]}
@@ -384,13 +397,13 @@ export default function SonifyScreen() {
 
         <Text style={styles.controlHint}>
           {state.audioUri
-            ? "Audio ready · Tap ⚡ to re-synthesize with current settings"
+            ? "Audio ready · Tap ⚡ to re-synthesize · Tap 💾 to save"
             : state.imageUri
             ? "Tap ▶ to synthesize — every pixel will be translated to sound"
             : "Select an image from the home screen first"}
         </Text>
 
-        {/* ── Duration ───────────────────────────────────────────────────── */}
+        {/* ── Duration ─────────────────────────────────────────────────────── */}
         <View style={styles.durationRow}>
           <Text style={styles.durationLabel}>Duration</Text>
           {[5, 10, 20, 30].map((d) => (
@@ -413,7 +426,129 @@ export default function SonifyScreen() {
             </Pressable>
           ))}
         </View>
+
+        {/* ── Save section ─────────────────────────────────────────────────── */}
+        <View style={styles.saveSection}>
+          <Text style={styles.saveSectionTitle}>Save Audio</Text>
+          <View style={styles.saveRow}>
+            {/* Individual */}
+            <Pressable
+              style={({ pressed }) => [
+                styles.saveCard,
+                pressed && { opacity: 0.75 },
+                !state.audioDataUri && styles.saveCardDisabled,
+              ]}
+              onPress={handleSaveIndividual}
+              disabled={!state.audioDataUri || isSaving}
+            >
+              <IconSymbol name="waveform" size={22} color="#2ECC9A" />
+              <Text style={styles.saveCardTitle}>Individual</Text>
+              <Text style={styles.saveCardDesc}>Image sonification only</Text>
+            </Pressable>
+
+            {/* Combined */}
+            <Pressable
+              style={({ pressed }) => [
+                styles.saveCard,
+                pressed && { opacity: 0.75 },
+              ]}
+              onPress={handleSaveCombined}
+              disabled={isSaving}
+            >
+              <IconSymbol name="music.note.list" size={22} color="#9B59B6" />
+              <Text style={styles.saveCardTitle}>Combined</Text>
+              <Text style={styles.saveCardDesc}>All active frequencies mixed</Text>
+            </Pressable>
+
+            {/* Stacked */}
+            <Pressable
+              style={({ pressed }) => [
+                styles.saveCard,
+                pressed && { opacity: 0.75 },
+                !state.audioDataUri && styles.saveCardDisabled,
+              ]}
+              onPress={handleSaveStacked}
+              disabled={!state.audioDataUri || isSaving}
+            >
+              <IconSymbol name="square.stack.3d.up" size={22} color="#F0A500" />
+              <Text style={styles.saveCardTitle}>Stacked</Text>
+              <Text style={styles.saveCardDesc}>Image + frequencies layered</Text>
+            </Pressable>
+          </View>
+          {isSaving && (
+            <View style={styles.savingRow}>
+              <ActivityIndicator size={14} color="#2ECC9A" />
+              <Text style={styles.savingText}>Generating and saving audio…</Text>
+            </View>
+          )}
+        </View>
       </ScrollView>
+
+      {/* ── Save menu modal ──────────────────────────────────────────────────── */}
+      <Modal
+        visible={showSaveMenu}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setShowSaveMenu(false)}
+      >
+        <Pressable
+          style={styles.modalOverlay}
+          onPress={() => setShowSaveMenu(false)}
+        >
+          <View style={styles.saveMenu}>
+            <Text style={styles.saveMenuTitle}>Save Audio</Text>
+
+            <Pressable
+              style={styles.saveMenuItem}
+              onPress={handleSaveIndividual}
+              disabled={!state.audioDataUri}
+            >
+              <IconSymbol name="waveform" size={20} color="#2ECC9A" />
+              <View style={styles.saveMenuItemInfo}>
+                <Text style={[styles.saveMenuItemTitle, !state.audioDataUri && { opacity: 0.4 }]}>
+                  Individual — Image Sonification
+                </Text>
+                <Text style={styles.saveMenuItemDesc}>
+                  Save the current image-to-sound translation as a WAV file
+                </Text>
+              </View>
+            </Pressable>
+
+            <Pressable style={styles.saveMenuItem} onPress={handleSaveCombined}>
+              <IconSymbol name="music.note.list" size={20} color="#9B59B6" />
+              <View style={styles.saveMenuItemInfo}>
+                <Text style={styles.saveMenuItemTitle}>Combined — Frequency Mix</Text>
+                <Text style={styles.saveMenuItemDesc}>
+                  All {state.enabledFrequencies.length} active frequencies mixed into one WAV
+                </Text>
+              </View>
+            </Pressable>
+
+            <Pressable
+              style={styles.saveMenuItem}
+              onPress={handleSaveStacked}
+              disabled={!state.audioDataUri}
+            >
+              <IconSymbol name="square.stack.3d.up" size={20} color="#F0A500" />
+              <View style={styles.saveMenuItemInfo}>
+                <Text style={[styles.saveMenuItemTitle, !state.audioDataUri && { opacity: 0.4 }]}>
+                  Stacked — Image + Frequencies
+                </Text>
+                <Text style={styles.saveMenuItemDesc}>
+                  Image sonification layered with all active frequency tones
+                </Text>
+              </View>
+            </Pressable>
+
+            <Pressable
+              style={styles.saveMenuCancel}
+              onPress={() => setShowSaveMenu(false)}
+            >
+              <Text style={styles.saveMenuCancelText}>Cancel</Text>
+            </Pressable>
+          </View>
+        </Pressable>
+      </Modal>
     </ScreenContainer>
   );
 }
@@ -428,6 +563,12 @@ const styles = StyleSheet.create({
     paddingBottom: 8,
   },
   iconBtn: { padding: 8 },
+  saveHeaderBtn: {
+    backgroundColor: "#161B22",
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: "#30363D",
+  },
   headerTitle: { fontSize: 16, fontWeight: "700", color: "#E6EDF3" },
   imageBox: {
     alignSelf: "center",
@@ -547,6 +688,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
     gap: 8,
     paddingHorizontal: 16,
+    marginBottom: 24,
   },
   durationLabel: {
     fontSize: 12,
@@ -567,4 +709,105 @@ const styles = StyleSheet.create({
   },
   durationBtnText: { fontSize: 12, color: "#7D8590", fontWeight: "600" },
   durationBtnTextActive: { color: "#2ECC9A" },
+  // ── Save section ──────────────────────────────────────────────────────────
+  saveSection: {
+    paddingHorizontal: 16,
+  },
+  saveSectionTitle: {
+    fontSize: 13,
+    fontWeight: "700",
+    color: "#7D8590",
+    marginBottom: 10,
+    textTransform: "uppercase",
+    letterSpacing: 0.8,
+  },
+  saveRow: {
+    flexDirection: "row",
+    gap: 10,
+  },
+  saveCard: {
+    flex: 1,
+    backgroundColor: "#161B22",
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: "#30363D",
+    padding: 12,
+    alignItems: "center",
+    gap: 6,
+  },
+  saveCardDisabled: { opacity: 0.35 },
+  saveCardTitle: {
+    fontSize: 12,
+    fontWeight: "700",
+    color: "#E6EDF3",
+    textAlign: "center",
+  },
+  saveCardDesc: {
+    fontSize: 10,
+    color: "#7D8590",
+    textAlign: "center",
+    lineHeight: 14,
+  },
+  savingRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    marginTop: 12,
+    justifyContent: "center",
+  },
+  savingText: { fontSize: 12, color: "#2ECC9A" },
+  // ── Save menu modal ────────────────────────────────────────────────────────
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: "rgba(0,0,0,0.6)",
+    justifyContent: "flex-end",
+  },
+  saveMenu: {
+    backgroundColor: "#161B22",
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    padding: 20,
+    paddingBottom: 36,
+    gap: 4,
+  },
+  saveMenuTitle: {
+    fontSize: 16,
+    fontWeight: "800",
+    color: "#E6EDF3",
+    marginBottom: 12,
+    textAlign: "center",
+  },
+  saveMenuItem: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 14,
+    backgroundColor: "#0D1117",
+    borderRadius: 14,
+    padding: 14,
+    marginBottom: 8,
+    borderWidth: 1,
+    borderColor: "#30363D",
+  },
+  saveMenuItemInfo: { flex: 1 },
+  saveMenuItemTitle: {
+    fontSize: 14,
+    fontWeight: "700",
+    color: "#E6EDF3",
+    marginBottom: 2,
+  },
+  saveMenuItemDesc: {
+    fontSize: 12,
+    color: "#7D8590",
+    lineHeight: 16,
+  },
+  saveMenuCancel: {
+    alignItems: "center",
+    paddingVertical: 14,
+    marginTop: 4,
+  },
+  saveMenuCancelText: {
+    fontSize: 14,
+    fontWeight: "600",
+    color: "#7D8590",
+  },
 });

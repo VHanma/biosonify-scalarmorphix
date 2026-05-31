@@ -119,6 +119,14 @@ const config: ExpoConfig = {
       },
     ],
     [
+      "expo-media-library",
+      {
+        "photosPermission": "Allow BioSonify to save audio files to your music library.",
+        "savePhotosPermission": "Allow BioSonify to save audio files to your device.",
+        "isAccessMediaLocationEnabled": true
+      }
+    ],
+    [
       "expo-build-properties",
       {
         android: {

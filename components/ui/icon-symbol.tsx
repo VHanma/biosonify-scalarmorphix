@@ -37,6 +37,28 @@ const MAPPING: IconMapping = {
   "sparkles": "auto-awesome",
   "list.bullet": "list",
   "clock.arrow.circlepath": "history",
+  // Save / export
+  "square.and.arrow.down": "save-alt",
+  "square.and.arrow.down.fill": "save",
+  "arrow.down.to.line": "vertical-align-bottom",
+  "tray.and.arrow.down.fill": "download",
+  "doc.badge.plus": "note-add",
+  "doc.on.doc": "file-copy",
+  "doc.on.doc.fill": "file-copy",
+  "checkmark": "check",
+  "plus": "add",
+  "minus": "remove",
+  "trash": "delete",
+  "trash.fill": "delete",
+  "magnifyingglass": "search",
+  "waveform.slash": "graphic-eq",
+  "music.quarternote.3": "music-note",
+  "square.stack.3d.up": "layers",
+  "square.stack.3d.up.fill": "layers",
+  "arrow.up.doc": "upload-file",
+  "arrow.up.doc.fill": "upload-file",
+  "folder.badge.plus": "create-new-folder",
+  "externaldrive.badge.checkmark": "storage",
 };
 
 export function IconSymbol({
