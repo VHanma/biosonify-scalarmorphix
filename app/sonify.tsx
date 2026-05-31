@@ -40,13 +40,16 @@ const MODE_LABELS: Record<SonificationMode, string> = {
 const MODE_COLORS: Record<SonificationMode, string> = {
   SPECTRAL: "#2ECC9A",
   WAVE_GENETICS: "#F0A500",
-  BIOFIELD: "#1A6B5A",
+  BIOFIELD: "#4A9EFF",
 };
 
 const MODE_DESCRIPTIONS: Record<SonificationMode, string> = {
-  SPECTRAL: "Pixel brightness → pitch · Color → timbre · Position → time",
-  WAVE_GENETICS: "Gariaev 40 Hz carrier · RGB → 396 / 528 / 741 Hz Solfeggio",
-  BIOFIELD: "Spectral + Schumann · Solfeggio · Brainwave carriers",
+  SPECTRAL:
+    "Every pixel: brightness → pitch · hue → timbre · saturation → harmonics · position → time",
+  WAVE_GENETICS:
+    "Every pixel: R→396 Hz · G→528 Hz · B→741 Hz · luminance→40 Hz coherence · X→phase · Y→detune",
+  BIOFIELD:
+    "Full spectral scan + pixel-driven biofield carriers (amplitude & phase from image data)",
 };
 
 export default function SonifyScreen() {
@@ -57,44 +60,34 @@ export default function SonifyScreen() {
   const scanAnim = useRef<Animated.CompositeAnimation | null>(null);
   const player = useAudioPlayer(null);
 
-  // Waveform bars (from synthesis or animated placeholder)
+  // Waveform bar animated values — only updated from real synthesis data
   const barAnims = useRef(
-    Array.from({ length: BAR_COUNT }, () => new Animated.Value(0.1))
+    Array.from({ length: BAR_COUNT }, () => new Animated.Value(0))
   ).current;
-  const idleAnim = useRef<Animated.CompositeAnimation | null>(null);
 
-  // Start idle waveform animation
+  // Update bar heights when real waveform data arrives
   useEffect(() => {
-    if (!state.isPlaying && state.waveformBars.length === 0) {
-      const anims = barAnims.map((anim, i) =>
-        Animated.loop(
-          Animated.sequence([
-            Animated.timing(anim, {
-              toValue: 0.1 + Math.random() * 0.4,
-              duration: 600 + i * 20,
-              useNativeDriver: false,
-            }),
-            Animated.timing(anim, {
-              toValue: 0.05 + Math.random() * 0.15,
-              duration: 600 + i * 15,
-              useNativeDriver: false,
-            }),
-          ])
-        )
-      );
-      idleAnim.current = Animated.parallel(anims);
-      idleAnim.current.start();
+    if (state.waveformBars.length > 0) {
+      state.waveformBars.forEach((val, i) => {
+        if (i < barAnims.length) {
+          Animated.timing(barAnims[i], {
+            toValue: val,
+            duration: 300,
+            useNativeDriver: false,
+          }).start();
+        }
+      });
     } else {
-      idleAnim.current?.stop();
-      // Set bars from synthesis data
-      if (state.waveformBars.length > 0) {
-        state.waveformBars.forEach((val, i) => {
-          if (i < barAnims.length) barAnims[i].setValue(val);
-        });
-      }
+      // No data yet — show flat line (all zeros), not random noise
+      barAnims.forEach((anim) => {
+        Animated.timing(anim, {
+          toValue: 0,
+          duration: 200,
+          useNativeDriver: false,
+        }).start();
+      });
     }
-    return () => idleAnim.current?.stop();
-  }, [state.isPlaying, state.waveformBars]);
+  }, [state.waveformBars]);
 
   // Setup audio mode
   useEffect(() => {
@@ -140,7 +133,7 @@ export default function SonifyScreen() {
       player.play();
       dispatch({ type: "SET_PLAYING", playing: true });
 
-      // Start scan line animation
+      // Scan line tracks playback position
       scanPos.setValue(0);
       scanAnim.current = Animated.timing(scanPos, {
         toValue: 1,
@@ -173,12 +166,11 @@ export default function SonifyScreen() {
 
   const handleExport = useCallback(async () => {
     if (!state.audioDataUri) {
-      Alert.alert("No audio", "Please synthesize audio first by pressing Play.");
+      Alert.alert("No audio", "Synthesize audio first by pressing Play.");
       return;
     }
     try {
       if (Platform.OS === "web") {
-        // Web: trigger download
         const a = document.createElement("a");
         a.href = state.audioDataUri;
         a.download = "biosonify-output.wav";
@@ -216,25 +208,25 @@ export default function SonifyScreen() {
         contentContainerStyle={{ flexGrow: 1, paddingBottom: 32 }}
         showsVerticalScrollIndicator={false}
       >
-        {/* ── Header ───────────────────────────────────────────────────── */}
+        {/* ── Header ─────────────────────────────────────────────────────── */}
         <View style={styles.header}>
           <Pressable
-            style={({ pressed }) => [styles.backBtn, pressed && { opacity: 0.6 }]}
+            style={({ pressed }) => [styles.iconBtn, pressed && { opacity: 0.6 }]}
             onPress={() => router.back()}
           >
             <IconSymbol name="chevron.left" size={22} color="#7D8590" />
           </Pressable>
           <Text style={styles.headerTitle}>Sonification Player</Text>
           <Pressable
-            style={({ pressed }) => [styles.exportBtn, pressed && { opacity: 0.6 }]}
+            style={({ pressed }) => [styles.iconBtn, pressed && { opacity: 0.6 }]}
             onPress={handleExport}
           >
             <IconSymbol name="square.and.arrow.up" size={20} color="#2ECC9A" />
           </Pressable>
         </View>
 
-        {/* ── Image Display with Scan Line ─────────────────────────────── */}
-        <View style={[styles.imageContainer, { width: imageAreaW, height: imageAreaH }]}>
+        {/* ── Image + scan line ──────────────────────────────────────────── */}
+        <View style={[styles.imageBox, { width: imageAreaW, height: imageAreaH }]}>
           {state.imageUri ? (
             <>
               <Image
@@ -242,11 +234,11 @@ export default function SonifyScreen() {
                 style={styles.image}
                 resizeMode="cover"
               />
-              {/* Scan line overlay */}
               <Animated.View
                 style={[
                   styles.scanLine,
                   {
+                    backgroundColor: MODE_COLORS[state.mode],
                     left: scanPos.interpolate({
                       inputRange: [0, 1],
                       outputRange: [0, imageAreaW],
@@ -254,24 +246,25 @@ export default function SonifyScreen() {
                   },
                 ]}
               />
-              {/* Processing overlay */}
               {(state.isProcessing || isExtracting) && (
                 <View style={styles.processingOverlay}>
                   <ActivityIndicator color="#2ECC9A" size="large" />
-                  <Text style={styles.processingText}>Synthesizing…</Text>
+                  <Text style={styles.processingText}>
+                    Translating image data to sound…
+                  </Text>
                 </View>
               )}
             </>
           ) : (
-            <View style={styles.noImagePlaceholder}>
+            <View style={styles.noImage}>
               <IconSymbol name="photo.fill" size={40} color="#30363D" />
               <Text style={styles.noImageText}>No image selected</Text>
             </View>
           )}
         </View>
 
-        {/* ── Waveform Visualizer ───────────────────────────────────────── */}
-        <View style={styles.waveformContainer}>
+        {/* ── Waveform — real data only ──────────────────────────────────── */}
+        <View style={styles.waveformRow}>
           {barAnims.map((anim, i) => (
             <Animated.View
               key={i}
@@ -280,52 +273,55 @@ export default function SonifyScreen() {
                 {
                   height: anim.interpolate({
                     inputRange: [0, 1],
-                    outputRange: [3, 52],
+                    outputRange: [2, 54],
                   }),
                   backgroundColor:
-                    MODE_COLORS[state.mode] +
-                    (state.isPlaying ? "FF" : "88"),
+                    state.waveformBars.length > 0
+                      ? MODE_COLORS[state.mode]
+                      : "#30363D",
+                  opacity: state.waveformBars.length > 0 ? 1 : 0.4,
                 },
               ]}
             />
           ))}
         </View>
+        <Text style={styles.waveformHint}>
+          {state.waveformBars.length > 0
+            ? "Waveform — every bar represents real image data"
+            : "Waveform will appear after synthesis"}
+        </Text>
 
-        {/* ── Mode Selector ─────────────────────────────────────────────── */}
+        {/* ── Mode selector ──────────────────────────────────────────────── */}
         <View style={styles.modeRow}>
-          {(["SPECTRAL", "WAVE_GENETICS", "BIOFIELD"] as SonificationMode[]).map(
-            (m) => (
-              <Pressable
-                key={m}
+          {(["SPECTRAL", "WAVE_GENETICS", "BIOFIELD"] as SonificationMode[]).map((m) => (
+            <Pressable
+              key={m}
+              style={[
+                styles.modeBtn,
+                state.mode === m && {
+                  backgroundColor: MODE_COLORS[m] + "22",
+                  borderColor: MODE_COLORS[m],
+                },
+              ]}
+              onPress={() => setMode(m)}
+            >
+              <Text
                 style={[
-                  styles.modeBtn,
-                  state.mode === m && {
-                    backgroundColor: MODE_COLORS[m] + "22",
-                    borderColor: MODE_COLORS[m],
-                  },
+                  styles.modeBtnText,
+                  state.mode === m && { color: MODE_COLORS[m] },
                 ]}
-                onPress={() => setMode(m)}
               >
-                <Text
-                  style={[
-                    styles.modeBtnText,
-                    state.mode === m && { color: MODE_COLORS[m] },
-                  ]}
-                >
-                  {MODE_LABELS[m]}
-                </Text>
-              </Pressable>
-            )
-          )}
+                {MODE_LABELS[m]}
+              </Text>
+            </Pressable>
+          ))}
         </View>
-
-        {/* Mode description */}
         <Text style={styles.modeDesc}>{MODE_DESCRIPTIONS[state.mode]}</Text>
 
-        {/* ── Playback Controls ─────────────────────────────────────────── */}
+        {/* ── Playback controls ──────────────────────────────────────────── */}
         <View style={styles.controls}>
           <Pressable
-            style={({ pressed }) => [styles.stopBtn, pressed && { opacity: 0.7 }]}
+            style={({ pressed }) => [styles.sideBtn, pressed && { opacity: 0.7 }]}
             onPress={handleStop}
           >
             <IconSymbol name="stop.fill" size={22} color="#7D8590" />
@@ -352,7 +348,11 @@ export default function SonifyScreen() {
           </Pressable>
 
           <Pressable
-            style={({ pressed }) => [styles.stopBtn, pressed && { opacity: 0.7 }]}
+            style={({ pressed }) => [
+              styles.sideBtn,
+              pressed && { opacity: 0.7 },
+              (!state.imageUri || state.isProcessing || isExtracting) && { opacity: 0.3 },
+            ]}
             onPress={synthesize}
             disabled={state.isProcessing || isExtracting || !state.imageUri}
           >
@@ -362,11 +362,13 @@ export default function SonifyScreen() {
 
         <Text style={styles.controlHint}>
           {state.audioDataUri
-            ? "Audio ready · Tap ⚡ to re-synthesize"
-            : "Tap ▶ to synthesize and play"}
+            ? "Audio ready · Tap ⚡ to re-synthesize with current settings"
+            : state.imageUri
+            ? "Tap ▶ to synthesize — every pixel will be translated to sound"
+            : "Select an image from the home screen first"}
         </Text>
 
-        {/* ── Duration Selector ─────────────────────────────────────────── */}
+        {/* ── Duration ───────────────────────────────────────────────────── */}
         <View style={styles.durationRow}>
           <Text style={styles.durationLabel}>Duration</Text>
           {[5, 10, 20, 30].map((d) => (
@@ -403,35 +405,22 @@ const styles = StyleSheet.create({
     paddingTop: 12,
     paddingBottom: 8,
   },
-  backBtn: {
-    padding: 8,
-  },
-  headerTitle: {
-    fontSize: 16,
-    fontWeight: "700",
-    color: "#E6EDF3",
-  },
-  exportBtn: {
-    padding: 8,
-  },
-  imageContainer: {
+  iconBtn: { padding: 8 },
+  headerTitle: { fontSize: 16, fontWeight: "700", color: "#E6EDF3" },
+  imageBox: {
     alignSelf: "center",
     marginHorizontal: 16,
     borderRadius: 14,
     overflow: "hidden",
     backgroundColor: "#161B22",
-    marginBottom: 16,
+    marginBottom: 12,
   },
-  image: {
-    width: "100%",
-    height: "100%",
-  },
+  image: { width: "100%", height: "100%" },
   scanLine: {
     position: "absolute",
     top: 0,
     bottom: 0,
     width: 2,
-    backgroundColor: "#2ECC9A",
     opacity: 0.9,
     shadowColor: "#2ECC9A",
     shadowOffset: { width: 0, height: 0 },
@@ -445,35 +434,35 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     gap: 12,
   },
-  processingText: {
-    color: "#2ECC9A",
-    fontSize: 14,
-    fontWeight: "600",
-  },
-  noImagePlaceholder: {
+  processingText: { color: "#2ECC9A", fontSize: 13, fontWeight: "600" },
+  noImage: {
     flex: 1,
     alignItems: "center",
     justifyContent: "center",
     gap: 8,
   },
-  noImageText: {
-    color: "#30363D",
-    fontSize: 14,
-  },
-  waveformContainer: {
+  noImageText: { color: "#30363D", fontSize: 14 },
+  waveformRow: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
     height: 60,
     paddingHorizontal: 16,
     gap: 2,
-    marginBottom: 16,
+    marginBottom: 4,
   },
   waveBar: {
     flex: 1,
     maxWidth: 8,
     borderRadius: 2,
-    minHeight: 3,
+    minHeight: 2,
+  },
+  waveformHint: {
+    fontSize: 10,
+    color: "#7D8590",
+    textAlign: "center",
+    marginBottom: 14,
+    fontStyle: "italic",
   },
   modeRow: {
     flexDirection: "row",
@@ -489,11 +478,7 @@ const styles = StyleSheet.create({
     borderColor: "#30363D",
     alignItems: "center",
   },
-  modeBtnText: {
-    fontSize: 11,
-    fontWeight: "600",
-    color: "#7D8590",
-  },
+  modeBtnText: { fontSize: 11, fontWeight: "600", color: "#7D8590" },
   modeDesc: {
     fontSize: 11,
     color: "#7D8590",
@@ -515,13 +500,9 @@ const styles = StyleSheet.create({
     borderRadius: 34,
     alignItems: "center",
     justifyContent: "center",
-    shadowColor: "#2ECC9A",
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.4,
-    shadowRadius: 12,
     elevation: 8,
   },
-  stopBtn: {
+  sideBtn: {
     width: 48,
     height: 48,
     borderRadius: 24,
@@ -536,6 +517,8 @@ const styles = StyleSheet.create({
     color: "#7D8590",
     textAlign: "center",
     marginBottom: 20,
+    paddingHorizontal: 20,
+    lineHeight: 16,
   },
   durationRow: {
     flexDirection: "row",
@@ -560,12 +543,6 @@ const styles = StyleSheet.create({
     backgroundColor: "#2ECC9A22",
     borderColor: "#2ECC9A",
   },
-  durationBtnText: {
-    fontSize: 12,
-    color: "#7D8590",
-    fontWeight: "600",
-  },
-  durationBtnTextActive: {
-    color: "#2ECC9A",
-  },
+  durationBtnText: { fontSize: 12, color: "#7D8590", fontWeight: "600" },
+  durationBtnTextActive: { color: "#2ECC9A" },
 });

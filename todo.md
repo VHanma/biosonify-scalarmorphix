@@ -28,3 +28,13 @@
 - [x] Real-time waveform visualizer
 - [x] Haptic feedback on play/stop
 - [x] Share audio functionality
+
+## Deterministic Engine Rebuild (v2)
+- [x] Remove ALL randomness from sonification engine
+- [x] Every pixel R/G/B/brightness/hue/saturation/position maps to a specific acoustic parameter
+- [x] Spectral mode: each pixel column = one time slice; each pixel row = one frequency bin; brightness = amplitude at that exact frequency bin
+- [x] Wave Genetics mode: full per-pixel RGB → Solfeggio amplitude mapping, no averaging
+- [x] Biofield mode: pixel data drives carrier amplitudes deterministically
+- [x] Remove idle waveform animation — waveform only shows real synthesized data
+- [x] Fix dev server port conflict
+- [x] Re-run all tests after engine rebuild
