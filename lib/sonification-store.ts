@@ -1,6 +1,10 @@
 /**
  * BioSonify global state store using React Context + useReducer.
  * Manages: selected image, sonification mode, active frequencies, playback state.
+ *
+ * Audio is stored as:
+ *  - wavBuffer: raw ArrayBuffer of the WAV file (used for save/export)
+ *  - audioUri: file:// URI on native, data: URI on web (used for playback)
  */
 
 import React, { createContext, useContext, useReducer, useCallback } from 'react';
@@ -19,9 +23,9 @@ export interface SonificationState {
   enabledFrequencies: string[]; // frequency IDs
   isPlaying: boolean;
   isProcessing: boolean;
-  /** data: URI (base64) — used for web playback and export */
-  audioDataUri: string | null;
-  /** file:// URI — used for native (Android/iOS) playback via expo-audio */
+  /** Raw WAV ArrayBuffer — used for save/export and stacking */
+  wavBuffer: ArrayBuffer | null;
+  /** file:// URI on native, data: URI on web — used for audio playback */
   audioUri: string | null;
   waveformBars: number[];
   recentImages: { uri: string; timestamp: number }[];
@@ -38,7 +42,7 @@ const initialState: SonificationState = {
   enabledFrequencies: defaultEnabled,
   isPlaying: false,
   isProcessing: false,
-  audioDataUri: null,
+  wavBuffer: null,
   audioUri: null,
   waveformBars: [],
   recentImages: [],
@@ -53,7 +57,7 @@ type Action =
   | { type: 'TOGGLE_FREQUENCY'; id: string }
   | { type: 'SET_PLAYING'; playing: boolean }
   | { type: 'SET_PROCESSING'; processing: boolean }
-  | { type: 'SET_AUDIO'; dataUri: string; audioUri: string; waveformBars: number[] }
+  | { type: 'SET_AUDIO'; wavBuffer: ArrayBuffer; audioUri: string; waveformBars: number[] }
   | { type: 'CLEAR_AUDIO' }
   | { type: 'ADD_RECENT'; uri: string }
   | { type: 'LOAD_PERSISTED'; state: Partial<SonificationState> };
@@ -66,15 +70,15 @@ function reducer(state: SonificationState, action: Action): SonificationState {
         imageUri: action.uri,
         imageWidth: action.width,
         imageHeight: action.height,
-        audioDataUri: null,
+        wavBuffer: null,
         audioUri: null,
         waveformBars: [],
         isPlaying: false,
       };
     case 'SET_MODE':
-      return { ...state, mode: action.mode, audioDataUri: null, audioUri: null, waveformBars: [] };
+      return { ...state, mode: action.mode, wavBuffer: null, audioUri: null, waveformBars: [] };
     case 'SET_DURATION':
-      return { ...state, durationSeconds: action.seconds, audioDataUri: null, audioUri: null };
+      return { ...state, durationSeconds: action.seconds, wavBuffer: null, audioUri: null };
     case 'TOGGLE_FREQUENCY': {
       const enabled = state.enabledFrequencies.includes(action.id)
         ? state.enabledFrequencies.filter((id) => id !== action.id)
@@ -88,13 +92,13 @@ function reducer(state: SonificationState, action: Action): SonificationState {
     case 'SET_AUDIO':
       return {
         ...state,
-        audioDataUri: action.dataUri,
+        wavBuffer: action.wavBuffer,
         audioUri: action.audioUri,
         waveformBars: action.waveformBars,
         isProcessing: false,
       };
     case 'CLEAR_AUDIO':
-      return { ...state, audioDataUri: null, audioUri: null, waveformBars: [], isPlaying: false };
+      return { ...state, wavBuffer: null, audioUri: null, waveformBars: [], isPlaying: false };
     case 'ADD_RECENT': {
       const existing = state.recentImages.filter((r) => r.uri !== action.uri);
       const updated = [{ uri: action.uri, timestamp: Date.now() }, ...existing].slice(0, 5);

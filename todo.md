@@ -52,3 +52,16 @@
 - [x] Integrate expo-media-library to save WAV directly to device music library
 - [ ] Add save history screen (future enhancement)
 - [x] Add share button on save screen (share via system share sheet)
+
+## APK Crash Fix (v6)
+- [ ] Audit every startup-time import for Android/Hermes incompatibility
+- [ ] Remove or replace any web-only API used at module load time
+- [ ] Ensure polyfills load before any other module
+- [ ] Replace AudioContext / Web Audio API with expo-audio only
+- [ ] Ensure all WAV generation writes to file:// not data: URIs
+- [ ] Verify expo-image-manipulator usage is Android-safe
+- [ ] Verify expo-media-library is correctly registered in app.config.ts
+- [ ] Verify expo-image-picker version matches SDK 54
+- [ ] Run TypeScript check: 0 errors
+- [ ] Run all tests: 25/25 pass
+- [ ] Confirm dev preview loads without white/black screen

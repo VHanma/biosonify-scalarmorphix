@@ -124,10 +124,8 @@ export default function SonifyScreen() {
       });
       const wavBuffer = encodeWav(samples, 44100);
       const audioUri = await writeWavToFile(wavBuffer);
-      const base64 = arrayBufferToBase64(wavBuffer);
-      const dataUri = `data:audio/wav;base64,${base64}`;
       const bars = extractWaveformBars(samples, BAR_COUNT);
-      dispatch({ type: "SET_AUDIO", dataUri, audioUri, waveformBars: bars });
+      dispatch({ type: "SET_AUDIO", wavBuffer, audioUri, waveformBars: bars });
     } catch (e) {
       dispatch({ type: "SET_PROCESSING", processing: false });
       Alert.alert("Synthesis failed", String(e));
@@ -176,7 +174,7 @@ export default function SonifyScreen() {
   // ── Save handlers ────────────────────────────────────────────────────────────
 
   const handleSaveIndividual = useCallback(async () => {
-    if (!state.audioDataUri) {
+    if (!state.wavBuffer) {
       Alert.alert("No audio", "Synthesize audio first by pressing Play.");
       return;
     }
@@ -184,7 +182,7 @@ export default function SonifyScreen() {
     setShowSaveMenu(false);
     try {
       await saveIndividualSonification(
-        state.audioDataUri,
+        state.wavBuffer,
         `BioSonify_${state.mode}_${state.durationSeconds}s`
       );
     } catch (e) {
@@ -192,7 +190,7 @@ export default function SonifyScreen() {
     } finally {
       setIsSaving(false);
     }
-  }, [state.audioDataUri, state.mode, state.durationSeconds]);
+  }, [state.wavBuffer, state.mode, state.durationSeconds]);
 
   const handleSaveCombined = useCallback(async () => {
     const enabled = getEnabledFrequencies();
@@ -208,7 +206,7 @@ export default function SonifyScreen() {
   }, [getEnabledFrequencies, state.durationSeconds]);
 
   const handleSaveStacked = useCallback(async () => {
-    if (!state.audioDataUri) {
+    if (!state.wavBuffer) {
       Alert.alert("No audio", "Synthesize audio first by pressing Play.");
       return;
     }
@@ -216,13 +214,13 @@ export default function SonifyScreen() {
     setIsSaving(true);
     setShowSaveMenu(false);
     try {
-      await saveStackedOutput(state.audioDataUri, enabled, state.durationSeconds);
+      await saveStackedOutput(state.wavBuffer, enabled, state.durationSeconds);
     } catch (e) {
       Alert.alert("Save failed", String(e));
     } finally {
       setIsSaving(false);
     }
-  }, [state.audioDataUri, getEnabledFrequencies, state.durationSeconds]);
+  }, [state.wavBuffer, getEnabledFrequencies, state.durationSeconds]);
 
   const imageAreaW = SCREEN_W - 32;
   const imageAreaH = Math.round(imageAreaW * 0.6);
@@ -436,10 +434,10 @@ export default function SonifyScreen() {
               style={({ pressed }) => [
                 styles.saveCard,
                 pressed && { opacity: 0.75 },
-                !state.audioDataUri && styles.saveCardDisabled,
+                !state.wavBuffer && styles.saveCardDisabled,
               ]}
               onPress={handleSaveIndividual}
-              disabled={!state.audioDataUri || isSaving}
+              disabled={!state.wavBuffer || isSaving}
             >
               <IconSymbol name="waveform" size={22} color="#2ECC9A" />
               <Text style={styles.saveCardTitle}>Individual</Text>
@@ -465,10 +463,10 @@ export default function SonifyScreen() {
               style={({ pressed }) => [
                 styles.saveCard,
                 pressed && { opacity: 0.75 },
-                !state.audioDataUri && styles.saveCardDisabled,
+                !state.wavBuffer && styles.saveCardDisabled,
               ]}
               onPress={handleSaveStacked}
-              disabled={!state.audioDataUri || isSaving}
+              disabled={!state.wavBuffer || isSaving}
             >
               <IconSymbol name="square.stack.3d.up" size={22} color="#F0A500" />
               <Text style={styles.saveCardTitle}>Stacked</Text>
@@ -501,11 +499,11 @@ export default function SonifyScreen() {
             <Pressable
               style={styles.saveMenuItem}
               onPress={handleSaveIndividual}
-              disabled={!state.audioDataUri}
+              disabled={!state.wavBuffer}
             >
               <IconSymbol name="waveform" size={20} color="#2ECC9A" />
               <View style={styles.saveMenuItemInfo}>
-                <Text style={[styles.saveMenuItemTitle, !state.audioDataUri && { opacity: 0.4 }]}>
+                <Text style={[styles.saveMenuItemTitle, !state.wavBuffer && { opacity: 0.4 }]}>
                   Individual — Image Sonification
                 </Text>
                 <Text style={styles.saveMenuItemDesc}>
@@ -527,11 +525,11 @@ export default function SonifyScreen() {
             <Pressable
               style={styles.saveMenuItem}
               onPress={handleSaveStacked}
-              disabled={!state.audioDataUri}
+              disabled={!state.wavBuffer}
             >
               <IconSymbol name="square.stack.3d.up" size={20} color="#F0A500" />
               <View style={styles.saveMenuItemInfo}>
-                <Text style={[styles.saveMenuItemTitle, !state.audioDataUri && { opacity: 0.4 }]}>
+                <Text style={[styles.saveMenuItemTitle, !state.wavBuffer && { opacity: 0.4 }]}>
                   Stacked — Image + Frequencies
                 </Text>
                 <Text style={styles.saveMenuItemDesc}>
