@@ -19,7 +19,10 @@ export interface SonificationState {
   enabledFrequencies: string[]; // frequency IDs
   isPlaying: boolean;
   isProcessing: boolean;
+  /** data: URI (base64) — used for web playback and export */
   audioDataUri: string | null;
+  /** file:// URI — used for native (Android/iOS) playback via expo-audio */
+  audioUri: string | null;
   waveformBars: number[];
   recentImages: { uri: string; timestamp: number }[];
 }
@@ -36,6 +39,7 @@ const initialState: SonificationState = {
   isPlaying: false,
   isProcessing: false,
   audioDataUri: null,
+  audioUri: null,
   waveformBars: [],
   recentImages: [],
 };
@@ -49,7 +53,7 @@ type Action =
   | { type: 'TOGGLE_FREQUENCY'; id: string }
   | { type: 'SET_PLAYING'; playing: boolean }
   | { type: 'SET_PROCESSING'; processing: boolean }
-  | { type: 'SET_AUDIO'; dataUri: string; waveformBars: number[] }
+  | { type: 'SET_AUDIO'; dataUri: string; audioUri: string; waveformBars: number[] }
   | { type: 'CLEAR_AUDIO' }
   | { type: 'ADD_RECENT'; uri: string }
   | { type: 'LOAD_PERSISTED'; state: Partial<SonificationState> };
@@ -63,13 +67,14 @@ function reducer(state: SonificationState, action: Action): SonificationState {
         imageWidth: action.width,
         imageHeight: action.height,
         audioDataUri: null,
+        audioUri: null,
         waveformBars: [],
         isPlaying: false,
       };
     case 'SET_MODE':
-      return { ...state, mode: action.mode, audioDataUri: null, waveformBars: [] };
+      return { ...state, mode: action.mode, audioDataUri: null, audioUri: null, waveformBars: [] };
     case 'SET_DURATION':
-      return { ...state, durationSeconds: action.seconds, audioDataUri: null };
+      return { ...state, durationSeconds: action.seconds, audioDataUri: null, audioUri: null };
     case 'TOGGLE_FREQUENCY': {
       const enabled = state.enabledFrequencies.includes(action.id)
         ? state.enabledFrequencies.filter((id) => id !== action.id)
@@ -84,11 +89,12 @@ function reducer(state: SonificationState, action: Action): SonificationState {
       return {
         ...state,
         audioDataUri: action.dataUri,
+        audioUri: action.audioUri,
         waveformBars: action.waveformBars,
         isProcessing: false,
       };
     case 'CLEAR_AUDIO':
-      return { ...state, audioDataUri: null, waveformBars: [], isPlaying: false };
+      return { ...state, audioDataUri: null, audioUri: null, waveformBars: [], isPlaying: false };
     case 'ADD_RECENT': {
       const existing = state.recentImages.filter((r) => r.uri !== action.uri);
       const updated = [{ uri: action.uri, timestamp: Date.now() }, ...existing].slice(0, 5);

@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useRef, useState } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import {
   View,
   Text,
@@ -23,7 +23,7 @@ import { useImagePixels } from "@/lib/use-image-pixels";
 import {
   synthesizeFromPixels,
   encodeWav,
-  arrayBufferToBase64DataUri,
+  arrayBufferToBase64,
   extractWaveformBars,
   type SonificationMode,
 } from "@/lib/sonification-engine";
@@ -52,6 +52,23 @@ const MODE_DESCRIPTIONS: Record<SonificationMode, string> = {
     "Full spectral scan + pixel-driven biofield carriers (amplitude & phase from image data)",
 };
 
+/**
+ * Write WAV ArrayBuffer to a cache file and return a file:// URI.
+ * On web, returns a data: URI instead (file system not available).
+ */
+async function writeWavToFile(wavBuffer: ArrayBuffer): Promise<string> {
+  if (Platform.OS === "web") {
+    const base64 = arrayBufferToBase64(wavBuffer);
+    return `data:audio/wav;base64,${base64}`;
+  }
+  const path = (FileSystem.cacheDirectory ?? "") + "biosonify-output.wav";
+  const base64 = arrayBufferToBase64(wavBuffer);
+  await FileSystem.writeAsStringAsync(path, base64, {
+    encoding: FileSystem.EncodingType.Base64,
+  });
+  return path; // file:// URI — works on Android and iOS
+}
+
 export default function SonifyScreen() {
   const router = useRouter();
   const { state, dispatch, getEnabledHz } = useSonification();
@@ -78,7 +95,6 @@ export default function SonifyScreen() {
         }
       });
     } else {
-      // No data yet — show flat line (all zeros), not random noise
       barAnims.forEach((anim) => {
         Animated.timing(anim, {
           toValue: 0,
@@ -89,7 +105,7 @@ export default function SonifyScreen() {
     }
   }, [state.waveformBars]);
 
-  // Setup audio mode
+  // Setup audio mode — correct option name is playsInSilentMode (not playsInSilentModeIOS)
   useEffect(() => {
     setAudioModeAsync({ playsInSilentMode: true }).catch(() => {});
     return () => {
@@ -113,10 +129,17 @@ export default function SonifyScreen() {
       });
 
       const wavBuffer = encodeWav(samples, 44100);
-      const dataUri = arrayBufferToBase64DataUri(wavBuffer);
+
+      // Write to file:// path on native (data: URIs don't work on Android)
+      const audioUri = await writeWavToFile(wavBuffer);
+
+      // For waveform display and export, keep base64 in state
+      const base64 = arrayBufferToBase64(wavBuffer);
+      const dataUri = `data:audio/wav;base64,${base64}`;
       const bars = extractWaveformBars(samples, BAR_COUNT);
 
-      dispatch({ type: "SET_AUDIO", dataUri, waveformBars: bars });
+      // Store both: dataUri for export/web, audioUri (file://) for native playback
+      dispatch({ type: "SET_AUDIO", dataUri, audioUri, waveformBars: bars });
     } catch (e) {
       dispatch({ type: "SET_PROCESSING", processing: false });
       Alert.alert("Synthesis failed", String(e));
@@ -124,16 +147,15 @@ export default function SonifyScreen() {
   }, [state.imageUri, state.mode, state.durationSeconds, extractPixels, getEnabledHz, dispatch]);
 
   const handlePlay = useCallback(async () => {
-    if (!state.audioDataUri) {
+    if (!state.audioUri) {
       await synthesize();
       return;
     }
     try {
-      player.replace({ uri: state.audioDataUri });
+      player.replace({ uri: state.audioUri });
       player.play();
       dispatch({ type: "SET_PLAYING", playing: true });
 
-      // Scan line tracks playback position
       scanPos.setValue(0);
       scanAnim.current = Animated.timing(scanPos, {
         toValue: 1,
@@ -149,7 +171,7 @@ export default function SonifyScreen() {
     } catch (e) {
       Alert.alert("Playback error", String(e));
     }
-  }, [state.audioDataUri, state.durationSeconds, synthesize, player, dispatch]);
+  }, [state.audioUri, state.durationSeconds, synthesize, player, dispatch]);
 
   const handlePause = useCallback(() => {
     player.pause();
@@ -176,7 +198,7 @@ export default function SonifyScreen() {
         a.download = "biosonify-output.wav";
         a.click();
       } else {
-        const path = FileSystem.cacheDirectory + "biosonify-output.wav";
+        const path = (FileSystem.cacheDirectory ?? "") + "biosonify-export.wav";
         const base64 = state.audioDataUri.replace("data:audio/wav;base64,", "");
         await FileSystem.writeAsStringAsync(path, base64, {
           encoding: FileSystem.EncodingType.Base64,
@@ -184,7 +206,7 @@ export default function SonifyScreen() {
         if (await Sharing.isAvailableAsync()) {
           await Sharing.shareAsync(path, { mimeType: "audio/wav" });
         } else {
-          Alert.alert("Saved", "Audio saved to: " + path);
+          Alert.alert("Saved", "Audio saved to cache: " + path);
         }
       }
     } catch (e) {
@@ -361,7 +383,7 @@ export default function SonifyScreen() {
         </View>
 
         <Text style={styles.controlHint}>
-          {state.audioDataUri
+          {state.audioUri
             ? "Audio ready · Tap ⚡ to re-synthesize with current settings"
             : state.imageUri
             ? "Tap ▶ to synthesize — every pixel will be translated to sound"

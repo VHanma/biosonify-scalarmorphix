@@ -1,14 +1,15 @@
 /**
- * BioSonify Deterministic Sonification Engine v2
+ * BioSonify Deterministic Sonification Engine v3
+ *
+ * ANDROID COMPATIBILITY:
+ * - NO btoa/atob usage — uses a self-contained base64 encoder
+ * - Exports both ArrayBuffer (for file writing) and base64 string
+ * - All synthesis is pure JS arithmetic — no browser globals required
  *
  * CORE PRINCIPLE: Every audio sample is a mathematically exact, deterministic
- * function of the image's pixel data. There is ZERO randomness. The same image
- * always produces the exact same audio. Every pixel's R, G, B, brightness,
- * hue, saturation, and position all contribute to the output.
+ * function of the image's pixel data. Zero randomness. Same image = same audio.
  *
  * ── MODE 1: SPECTRAL SCAN (Gariaev biophoton laser scan model) ─────────────
- * The image is treated as a 2D spectrogram — exactly as a laser scanner reads
- * a biological sample column by column:
  *   X axis     → time   (each pixel column = one time slice)
  *   Y axis     → frequency bin (each pixel row = one exact frequency)
  *   Brightness → amplitude of that frequency bin at that moment
@@ -17,7 +18,6 @@
  *   Alpha      → gates the pixel (transparent pixels = silence)
  *
  * ── MODE 2: WAVE GENETICS (Gariaev / Jiang Kanzhen) ───────────────────────
- * Each pixel drives four carriers independently — no averaging loses data:
  *   R channel  → amplitude of 396 Hz (UT — liberation from fear)
  *   G channel  → amplitude of 528 Hz (MI — DNA repair / transformation)
  *   B channel  → amplitude of 741 Hz (SOL — awakening intuition)
@@ -26,10 +26,9 @@
  *   Y position → frequency micro-shift (encodes vertical position in pitch)
  *
  * ── MODE 3: BIOFIELD OVERLAY ───────────────────────────────────────────────
- * Full Spectral base (all pixel data) + user-selected biofield carriers.
- * Each carrier's amplitude is driven by the column's luminance (not fixed).
- * Each carrier's phase is seeded by the column's dominant hue (color → phase).
- * Nothing in the carrier layer is constant — all parameters are pixel-driven.
+ *   Full Spectral base + user-selected biofield carriers.
+ *   Each carrier amplitude = column luminance (pixel-driven, not fixed).
+ *   Each carrier phase = column hue (color → phase domain).
  */
 
 export type SonificationMode = "SPECTRAL" | "WAVE_GENETICS" | "BIOFIELD";
@@ -44,30 +43,24 @@ export interface PixelData {
 export interface SonificationOptions {
   mode: SonificationMode;
   durationSeconds: number;
-  carrierFrequencies: number[]; // Hz — used in BIOFIELD mode
+  carrierFrequencies: number[];
   sampleRate: number;
 }
 
 // ─── Frequency mapping constants ──────────────────────────────────────────────
-const MIN_FREQ_HZ = 80;   // bottom pixel row → 80 Hz
-const MAX_FREQ_HZ = 8000; // top pixel row → 8000 Hz
+const MIN_FREQ_HZ = 80;
+const MAX_FREQ_HZ = 8000;
+const GARIAEV_HZ  = 40;
+const SOL_UT      = 396;
+const SOL_MI      = 528;
+const SOL_SOL     = 741;
 
-// Gariaev coherence carrier
-const GARIAEV_HZ = 40;
+// ─── Pixel math ───────────────────────────────────────────────────────────────
 
-// Solfeggio carriers
-const SOL_UT  = 396; // R channel
-const SOL_MI  = 528; // G channel — DNA repair
-const SOL_SOL = 741; // B channel
-
-// ─── Pixel math utilities ─────────────────────────────────────────────────────
-
-/** Perceptual luminance 0–1 */
 function lum(p: PixelData): number {
   return (0.2126 * p.r + 0.7152 * p.g + 0.0722 * p.b) / 255;
 }
 
-/** RGB → HSV. Returns [hue 0–360, sat 0–1, val 0–1] */
 function toHsv(p: PixelData): [number, number, number] {
   const r = p.r / 255, g = p.g / 255, b = p.b / 255;
   const max = Math.max(r, g, b), min = Math.min(r, g, b), d = max - min;
@@ -80,10 +73,6 @@ function toHsv(p: PixelData): [number, number, number] {
   return [h * 360, max === 0 ? 0 : d / max, max];
 }
 
-/**
- * Map pixel row to frequency using logarithmic (musical) spacing.
- * Top row = highest frequency, bottom row = lowest.
- */
 function rowToHz(row: number, totalRows: number): number {
   const t = 1 - row / Math.max(totalRows - 1, 1);
   const logMin = Math.log2(MIN_FREQ_HZ);
@@ -91,19 +80,11 @@ function rowToHz(row: number, totalRows: number): number {
   return Math.pow(2, logMin + t * (logMax - logMin));
 }
 
-/**
- * Waveform shape blend based on hue.
- * hue 0–120 (red-green): sine
- * hue 120–240 (green-blue): triangle
- * hue 240–360 (blue-red): sawtooth
- * Returns a sample value at the given phase.
- */
 function shapedOscillator(phase: number, hue: number): number {
-  const p = phase - Math.floor(phase); // 0–1
+  const p = phase - Math.floor(phase);
   const sine = Math.sin(2 * Math.PI * p);
   const tri  = 4 * Math.abs(p - 0.5) - 1;
   const saw  = 2 * p - 1;
-
   if (hue < 120) {
     const t = hue / 120;
     return sine * (1 - t) + tri * t;
@@ -115,8 +96,6 @@ function shapedOscillator(phase: number, hue: number): number {
     return saw * (1 - t) + sine * t;
   }
 }
-
-// ─── Normalize ────────────────────────────────────────────────────────────────
 
 function normalize(buf: Float32Array): Float32Array {
   let peak = 0;
@@ -134,16 +113,11 @@ function normalize(buf: Float32Array): Float32Array {
 // ─── ENGINE 1: SPECTRAL SCAN ─────────────────────────────────────────────────
 
 function spectral(
-  pixels: PixelData[],
-  width: number,
-  height: number,
-  totalSamples: number,
-  sampleRate: number,
+  pixels: PixelData[], width: number, height: number,
+  totalSamples: number, sampleRate: number,
 ): Float32Array {
   const out = new Float32Array(totalSamples);
   const samplesPerCol = totalSamples / width;
-
-  // One phase accumulator per row (frequency bin) — carries phase across columns
   const phaseAcc = new Float64Array(height);
 
   for (let col = 0; col < width; col++) {
@@ -153,65 +127,47 @@ function spectral(
 
     for (let row = 0; row < height; row++) {
       const px = pixels[row * width + col];
-      if (!px || px.a < 4) {
-        // Transparent pixel — advance phase silently to maintain continuity
-        const hz = rowToHz(row, height);
-        phaseAcc[row] = (phaseAcc[row] + n * hz / sampleRate) % 1;
+      const hz = rowToHz(row, height);
+      const dt = hz / sampleRate;
+
+      if (!px || px.a < 4 || lum(px) < 0.004) {
+        phaseAcc[row] = (phaseAcc[row] + n * dt) % 1;
         continue;
       }
 
       const brightness = lum(px);
-      if (brightness < 0.004) {
-        const hz = rowToHz(row, height);
-        phaseAcc[row] = (phaseAcc[row] + n * hz / sampleRate) % 1;
-        continue;
-      }
-
-      const hz  = rowToHz(row, height);
-      const dt  = hz / sampleRate;
       const [hue, sat] = toHsv(px);
-
-      // Amplitude: brightness / height so all rows sum to ≤ 1
       const amp  = brightness / height;
-      // Harmonic amplitudes driven by saturation (not random)
       const h2   = sat * 0.35 * amp;
       const h3   = sat * 0.18 * amp;
       const dt2  = dt * 2;
       const dt3  = dt * 3;
 
       for (let s = s0; s < s1; s++) {
-        const localT = s - s0;
-        const ph  = phaseAcc[row] + localT * dt;
-        const ph2 = phaseAcc[row] + localT * dt2;
-        const ph3 = phaseAcc[row] + localT * dt3;
-
+        const lt  = s - s0;
+        const ph  = phaseAcc[row] + lt * dt;
+        const ph2 = phaseAcc[row] + lt * dt2;
+        const ph3 = phaseAcc[row] + lt * dt3;
         out[s] +=
           amp * shapedOscillator(ph, hue) +
           h2  * Math.sin(2 * Math.PI * ph2) +
           h3  * Math.sin(2 * Math.PI * ph3);
       }
-
       phaseAcc[row] = (phaseAcc[row] + n * dt) % 1;
     }
   }
-
   return normalize(out);
 }
 
 // ─── ENGINE 2: WAVE GENETICS ─────────────────────────────────────────────────
 
 function waveGenetics(
-  pixels: PixelData[],
-  width: number,
-  height: number,
-  totalSamples: number,
-  sampleRate: number,
+  pixels: PixelData[], width: number, height: number,
+  totalSamples: number, sampleRate: number,
 ): Float32Array {
   const out = new Float32Array(totalSamples);
   const samplesPerCol = totalSamples / width;
-
-  // Persistent phase accumulators for the four carriers
-  let phUT  = 0, phMI  = 0, phSOL = 0, phCoh = 0;
+  let phUT = 0, phMI = 0, phSOL = 0, phCoh = 0;
   const dtUT  = SOL_UT  / sampleRate;
   const dtMI  = SOL_MI  / sampleRate;
   const dtSOL = SOL_SOL / sampleRate;
@@ -221,22 +177,16 @@ function waveGenetics(
     const s0 = Math.floor(col * samplesPerCol);
     const s1 = Math.floor((col + 1) * samplesPerCol);
     const n  = s1 - s0;
+    const spatialPhase = col / width;
 
-    // Spatial phase offset from column position — encodes X position in phase
-    const spatialPhase = col / width; // 0–1, deterministic
-
-    // Process each pixel in the column individually — no lossy averaging
     for (let row = 0; row < height; row++) {
       const px = pixels[row * width + col];
       if (!px || px.a < 4) continue;
 
-      // Per-pixel amplitudes from actual channel values
-      const ampUT  = px.r / 255 / height; // R → 396 Hz
-      const ampMI  = px.g / 255 / height; // G → 528 Hz
-      const ampSOL = px.b / 255 / height; // B → 741 Hz
-      const ampCoh = lum(px)    / height; // luminance → 40 Hz
-
-      // Y position encodes a micro-pitch shift (row/height → ±2% detune)
+      const ampUT  = px.r / 255 / height;
+      const ampMI  = px.g / 255 / height;
+      const ampSOL = px.b / 255 / height;
+      const ampCoh = lum(px)    / height;
       const detune = 1 + (row / height - 0.5) * 0.04;
 
       for (let s = s0; s < s1; s++) {
@@ -245,10 +195,7 @@ function waveGenetics(
         const pMI  = (phMI  + lt * dtMI  * detune + spatialPhase * 0.5) % 1;
         const pSOL = (phSOL + lt * dtSOL * detune + spatialPhase * 0.5) % 1;
         const pCoh = (phCoh + lt * dtCoh) % 1;
-
-        // 40 Hz coherence carrier AM-modulates all three Solfeggio carriers
-        const coh = 0.5 + 0.5 * Math.sin(2 * Math.PI * pCoh);
-
+        const coh  = 0.5 + 0.5 * Math.sin(2 * Math.PI * pCoh);
         out[s] +=
           coh * (
             ampUT  * Math.sin(2 * Math.PI * pUT)  +
@@ -258,28 +205,20 @@ function waveGenetics(
           ampCoh * Math.sin(2 * Math.PI * pCoh);
       }
     }
-
-    // Advance carrier phases by the column's sample count
     phUT  = (phUT  + n * dtUT)  % 1;
     phMI  = (phMI  + n * dtMI)  % 1;
     phSOL = (phSOL + n * dtSOL) % 1;
     phCoh = (phCoh + n * dtCoh) % 1;
   }
-
   return normalize(out);
 }
 
 // ─── ENGINE 3: BIOFIELD OVERLAY ──────────────────────────────────────────────
 
 function biofield(
-  pixels: PixelData[],
-  width: number,
-  height: number,
-  totalSamples: number,
-  sampleRate: number,
-  carriers: number[],
+  pixels: PixelData[], width: number, height: number,
+  totalSamples: number, sampleRate: number, carriers: number[],
 ): Float32Array {
-  // Spectral base carries ALL pixel information
   const base = spectral(pixels, width, height, totalSamples, sampleRate);
   if (carriers.length === 0) return base;
 
@@ -292,7 +231,6 @@ function biofield(
     const s1 = Math.floor((col + 1) * samplesPerCol);
     const n  = s1 - s0;
 
-    // Column statistics — derived entirely from pixel data
     let sumLum = 0, sumHue = 0, count = 0;
     for (let row = 0; row < height; row++) {
       const px = pixels[row * width + col];
@@ -302,6 +240,7 @@ function biofield(
       sumHue += h;
       count++;
     }
+
     if (count === 0) {
       for (let ci = 0; ci < carriers.length; ci++) {
         phaseAcc[ci] = (phaseAcc[ci] + n * carriers[ci] / sampleRate) % 1;
@@ -309,24 +248,21 @@ function biofield(
       continue;
     }
 
-    const colLum = sumLum / count;         // drives carrier amplitude
-    const colHue = sumHue / (count * 360); // drives phase offset (color → phase)
+    const colLum = sumLum / count;
+    const colHue = sumHue / (count * 360);
 
     for (let ci = 0; ci < carriers.length; ci++) {
       const hz = carriers[ci];
       const dt = hz / sampleRate;
-
       for (let s = s0; s < s1; s++) {
         const lt = s - s0;
         const ph = (phaseAcc[ci] + lt * dt + colHue) % 1;
         overlay[s] += colLum * Math.sin(2 * Math.PI * ph) / carriers.length;
       }
-
       phaseAcc[ci] = (phaseAcc[ci] + n * dt) % 1;
     }
   }
 
-  // Mix: 60% spectral (full pixel data) + 40% biofield carriers (pixel-driven)
   const mixed = new Float32Array(totalSamples);
   for (let i = 0; i < totalSamples; i++) {
     mixed[i] = base[i] * 0.6 + overlay[i] * 0.4;
@@ -334,51 +270,37 @@ function biofield(
   return normalize(mixed);
 }
 
-// ─── Public API ───────────────────────────────────────────────────────────────
+// ─── Public synthesis API ─────────────────────────────────────────────────────
 
 export function synthesizeFromPixels(
-  pixels: PixelData[],
-  width: number,
-  height: number,
+  pixels: PixelData[], width: number, height: number,
   options: SonificationOptions,
 ): Float32Array {
   const { mode, durationSeconds, carrierFrequencies, sampleRate } = options;
   const totalSamples = Math.floor(sampleRate * durationSeconds);
-
   switch (mode) {
-    case "SPECTRAL":
-      return spectral(pixels, width, height, totalSamples, sampleRate);
-    case "WAVE_GENETICS":
-      return waveGenetics(pixels, width, height, totalSamples, sampleRate);
-    case "BIOFIELD":
-      return biofield(pixels, width, height, totalSamples, sampleRate, carrierFrequencies);
-    default:
-      return spectral(pixels, width, height, totalSamples, sampleRate);
+    case "SPECTRAL":      return spectral(pixels, width, height, totalSamples, sampleRate);
+    case "WAVE_GENETICS": return waveGenetics(pixels, width, height, totalSamples, sampleRate);
+    case "BIOFIELD":      return biofield(pixels, width, height, totalSamples, sampleRate, carrierFrequencies);
+    default:              return spectral(pixels, width, height, totalSamples, sampleRate);
   }
 }
 
 // ─── WAV Encoding ─────────────────────────────────────────────────────────────
 
 export function encodeWav(samples: Float32Array, sampleRate: number): ArrayBuffer {
-  const dataSize = samples.length * 2; // 16-bit PCM
+  const dataSize = samples.length * 2;
   const buf = new ArrayBuffer(44 + dataSize);
   const v   = new DataView(buf);
   const ws  = (off: number, s: string) => {
     for (let i = 0; i < s.length; i++) v.setUint8(off + i, s.charCodeAt(i));
   };
-  ws(0, "RIFF");
-  v.setUint32(4, 36 + dataSize, true);
-  ws(8, "WAVE");
-  ws(12, "fmt ");
-  v.setUint32(16, 16, true);
-  v.setUint16(20, 1, true);           // PCM
-  v.setUint16(22, 1, true);           // mono
-  v.setUint32(24, sampleRate, true);
-  v.setUint32(28, sampleRate * 2, true);
-  v.setUint16(32, 2, true);
-  v.setUint16(34, 16, true);
-  ws(36, "data");
-  v.setUint32(40, dataSize, true);
+  ws(0, "RIFF"); v.setUint32(4, 36 + dataSize, true);
+  ws(8, "WAVE"); ws(12, "fmt ");
+  v.setUint32(16, 16, true); v.setUint16(20, 1, true); v.setUint16(22, 1, true);
+  v.setUint32(24, sampleRate, true); v.setUint32(28, sampleRate * 2, true);
+  v.setUint16(32, 2, true); v.setUint16(34, 16, true);
+  ws(36, "data"); v.setUint32(40, dataSize, true);
   for (let i = 0; i < samples.length; i++) {
     const c = Math.max(-1, Math.min(1, samples[i]));
     v.setInt16(44 + i * 2, Math.round(c * 32767), true);
@@ -386,18 +308,32 @@ export function encodeWav(samples: Float32Array, sampleRate: number): ArrayBuffe
   return buf;
 }
 
-export function arrayBufferToBase64DataUri(buffer: ArrayBuffer): string {
+// ─── Pure-JS Base64 encoder (no btoa — works on Android Hermes) ──────────────
+
+const B64_CHARS = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+
+export function arrayBufferToBase64(buffer: ArrayBuffer): string {
   const bytes = new Uint8Array(buffer);
-  let bin = "";
-  for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]);
-  return `data:audio/wav;base64,${btoa(bin)}`;
+  let result = "";
+  const len = bytes.length;
+  for (let i = 0; i < len; i += 3) {
+    const b0 = bytes[i];
+    const b1 = i + 1 < len ? bytes[i + 1] : 0;
+    const b2 = i + 2 < len ? bytes[i + 2] : 0;
+    result += B64_CHARS[b0 >> 2];
+    result += B64_CHARS[((b0 & 3) << 4) | (b1 >> 4)];
+    result += i + 1 < len ? B64_CHARS[((b1 & 15) << 2) | (b2 >> 6)] : "=";
+    result += i + 2 < len ? B64_CHARS[b2 & 63] : "=";
+  }
+  return result;
 }
 
-/**
- * Extract waveform bar heights from synthesized samples.
- * Uses RMS (root-mean-square) energy per chunk — purely from the audio data.
- * Returns values in [0, 1].
- */
+export function arrayBufferToBase64DataUri(buffer: ArrayBuffer): string {
+  return `data:audio/wav;base64,${arrayBufferToBase64(buffer)}`;
+}
+
+// ─── Waveform bars ────────────────────────────────────────────────────────────
+
 export function extractWaveformBars(samples: Float32Array, barCount: number): number[] {
   const chunk = Math.floor(samples.length / barCount);
   const bars: number[] = [];
@@ -406,20 +342,17 @@ export function extractWaveformBars(samples: Float32Array, barCount: number): nu
     const start = i * chunk;
     const end   = Math.min(start + chunk, samples.length);
     for (let j = start; j < end; j++) rms += samples[j] * samples[j];
-    bars.push(Math.sqrt(rms / (end - start)));
+    bars.push(Math.sqrt(rms / Math.max(end - start, 1)));
   }
   const maxBar = Math.max(...bars, 1e-9);
   return bars.map((b) => b / maxBar);
 }
 
-// ─── Legacy helpers (kept for compatibility) ──────────────────────────────────
+// ─── Legacy compat ────────────────────────────────────────────────────────────
 
 export function extractPixelGrid(
-  raw: Uint8ClampedArray | Uint8Array,
-  srcW: number,
-  srcH: number,
-  tW = 64,
-  tH = 32,
+  raw: Uint8ClampedArray | Uint8Array, srcW: number, srcH: number,
+  tW = 64, tH = 64,
 ): { pixels: PixelData[]; width: number; height: number } {
   const pixels: PixelData[] = [];
   const sx = srcW / tW, sy = srcH / tH;

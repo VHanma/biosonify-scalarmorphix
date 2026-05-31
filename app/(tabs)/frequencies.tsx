@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useRef, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import {
   View,
   Text,
@@ -8,6 +8,7 @@ import {
   TextInput,
   Platform,
 } from "react-native";
+import * as FileSystem from "expo-file-system/legacy";
 import { setAudioModeAsync, useAudioPlayer } from "expo-audio";
 import { ScreenContainer } from "@/components/screen-container";
 import { IconSymbol } from "@/components/ui/icon-symbol";
@@ -19,10 +20,8 @@ import {
 } from "@/lib/frequencies";
 import { useSonification } from "@/lib/sonification-store";
 import {
-  synthesizeFromPixels,
   encodeWav,
-  arrayBufferToBase64DataUri,
-  type PixelData,
+  arrayBufferToBase64,
 } from "@/lib/sonification-engine";
 
 const CATEGORY_COLORS: Record<FrequencyCategory, string> = {
@@ -33,20 +32,19 @@ const CATEGORY_COLORS: Record<FrequencyCategory, string> = {
   Rife: "#F85149",
 };
 
-/** Generate a 3-second pure sine tone for preview */
-function generatePreviewTone(hz: number): string {
+/** Generate a 3-second pure sine tone and return a playable URI */
+async function generatePreviewToneUri(hz: number): Promise<string> {
   const sampleRate = 44100;
   const duration = 3;
   const totalSamples = sampleRate * duration;
   const samples = new Float32Array(totalSamples);
 
-  // For very low frequencies (< 20 Hz), use a 200 Hz carrier AM-modulated by the frequency
+  // For very low frequencies (< 20 Hz), AM-modulate a 200 Hz carrier
   const audibleHz = hz < 20 ? 200 : hz;
   const modHz = hz < 20 ? hz : 0;
 
   for (let i = 0; i < totalSamples; i++) {
     const t = i / sampleRate;
-    // Fade in/out envelope
     const fade = Math.min(1, Math.min(t / 0.1, (duration - t) / 0.1));
     let s = Math.sin(2 * Math.PI * audibleHz * t) * 0.7 * fade;
     if (modHz > 0) {
@@ -56,7 +54,18 @@ function generatePreviewTone(hz: number): string {
   }
 
   const wav = encodeWav(samples, sampleRate);
-  return arrayBufferToBase64DataUri(wav);
+  const base64 = arrayBufferToBase64(wav);
+
+  if (Platform.OS === "web") {
+    return `data:audio/wav;base64,${base64}`;
+  }
+
+  // Native: write to file:// path — data: URIs don't work on Android
+  const path = (FileSystem.cacheDirectory ?? "") + `preview_${hz}.wav`;
+  await FileSystem.writeAsStringAsync(path, base64, {
+    encoding: FileSystem.EncodingType.Base64,
+  });
+  return path;
 }
 
 export default function FrequenciesScreen() {
@@ -67,6 +76,7 @@ export default function FrequenciesScreen() {
   const player = useAudioPlayer(null);
 
   useEffect(() => {
+    // Correct option name: playsInSilentMode (not playsInSilentModeIOS)
     setAudioModeAsync({ playsInSilentMode: true }).catch(() => {});
     return () => player.release();
   }, []);
@@ -82,17 +92,21 @@ export default function FrequenciesScreen() {
   });
 
   const previewTone = useCallback(
-    (entry: FrequencyEntry) => {
+    async (entry: FrequencyEntry) => {
       if (previewingId === entry.id) {
         player.pause();
         setPreviewingId(null);
         return;
       }
-      const dataUri = generatePreviewTone(entry.hz);
-      player.replace({ uri: dataUri });
-      player.play();
-      setPreviewingId(entry.id);
-      setTimeout(() => setPreviewingId(null), 3100);
+      try {
+        const uri = await generatePreviewToneUri(entry.hz);
+        player.replace({ uri });
+        player.play();
+        setPreviewingId(entry.id);
+        setTimeout(() => setPreviewingId(null), 3100);
+      } catch {
+        // silently ignore preview errors
+      }
     },
     [previewingId, player]
   );
@@ -109,61 +123,51 @@ export default function FrequenciesScreen() {
   const renderItem = ({ item }: { item: FrequencyEntry }) => {
     const isEnabled = state.enabledFrequencies.includes(item.id);
     const isPreviewing = previewingId === item.id;
-    const color = CATEGORY_COLORS[item.category];
+    const catColor = CATEGORY_COLORS[item.category];
 
     return (
-      <View style={[styles.freqCard, isEnabled && { borderLeftColor: color, borderLeftWidth: 3 }]}>
-        <View style={styles.freqHeader}>
-          <View style={[styles.catBadge, { backgroundColor: color + "22" }]}>
-            <Text style={[styles.catBadgeText, { color }]}>{item.category}</Text>
+      <View style={styles.card}>
+        <View style={[styles.catDot, { backgroundColor: catColor }]} />
+        <View style={styles.cardBody}>
+          <View style={styles.cardTop}>
+            <Text style={styles.freqName}>{item.name}</Text>
+            <Text style={[styles.freqHz, { color: catColor }]}>
+              {item.hz < 1 ? item.hz.toFixed(2) : item.hz % 1 === 0 ? item.hz : item.hz.toFixed(1)} Hz
+            </Text>
           </View>
-          <Text style={styles.freqHz}>{item.hz} Hz</Text>
-        </View>
-        <Text style={styles.freqName}>{item.name}</Text>
-        <Text style={styles.freqEffect} numberOfLines={3}>{item.effect}</Text>
-        <Text style={styles.freqSource}>Source: {item.source}</Text>
-
-        <View style={styles.freqActions}>
-          <Pressable
-            style={({ pressed }) => [
-              styles.previewBtn,
-              isPreviewing && { backgroundColor: color + "33", borderColor: color },
-              pressed && { opacity: 0.7 },
-            ]}
-            onPress={() => previewTone(item)}
-          >
-            <IconSymbol
-              name={isPreviewing ? "pause.fill" : "play.fill"}
-              size={14}
-              color={color}
-            />
-            <Text style={[styles.previewBtnText, { color }]}>
-              {isPreviewing ? "Stop" : "Preview"}
-            </Text>
-          </Pressable>
-
-          <Pressable
-            style={({ pressed }) => [
-              styles.toggleBtn,
-              isEnabled && { backgroundColor: color, borderColor: color },
-              pressed && { opacity: 0.7 },
-            ]}
-            onPress={() => toggleFrequency(item.id)}
-          >
-            <IconSymbol
-              name={isEnabled ? "checkmark.circle.fill" : "xmark.circle.fill"}
-              size={14}
-              color={isEnabled ? "#0D1117" : "#7D8590"}
-            />
-            <Text
-              style={[
-                styles.toggleBtnText,
-                isEnabled && { color: "#0D1117" },
-              ]}
+          <Text style={styles.freqEffect}>{item.effect}</Text>
+          <Text style={styles.freqSource}>{item.source}</Text>
+          <View style={styles.cardActions}>
+            <Pressable
+              style={[styles.actionBtn, isPreviewing && { borderColor: catColor }]}
+              onPress={() => previewTone(item)}
             >
-              {isEnabled ? "Active" : "Add"}
-            </Text>
-          </Pressable>
+              <IconSymbol
+                name={isPreviewing ? "pause.fill" : "play.fill"}
+                size={13}
+                color={isPreviewing ? catColor : "#7D8590"}
+              />
+              <Text style={[styles.actionBtnText, isPreviewing && { color: catColor }]}>
+                {isPreviewing ? "Stop" : "Preview"}
+              </Text>
+            </Pressable>
+            <Pressable
+              style={[
+                styles.actionBtn,
+                isEnabled && { borderColor: catColor, backgroundColor: catColor + "22" },
+              ]}
+              onPress={() => toggleFrequency(item.id)}
+            >
+              <IconSymbol
+                name={isEnabled ? "checkmark.circle.fill" : "plus.circle"}
+                size={13}
+                color={isEnabled ? catColor : "#7D8590"}
+              />
+              <Text style={[styles.actionBtnText, isEnabled && { color: catColor }]}>
+                {isEnabled ? "Added" : "Add to Mix"}
+              </Text>
+            </Pressable>
+          </View>
         </View>
       </View>
     );
@@ -174,36 +178,34 @@ export default function FrequenciesScreen() {
       {/* ── Header ─────────────────────────────────────────────────────── */}
       <View style={styles.header}>
         <Text style={styles.title}>Frequency Library</Text>
-        <View style={styles.activeCount}>
-          <Text style={styles.activeCountText}>{enabledCount} active</Text>
-        </View>
+        <Text style={styles.subtitle}>
+          {enabledCount} active · tap to add to biofield mix
+        </Text>
       </View>
 
       {/* ── Search ─────────────────────────────────────────────────────── */}
       <View style={styles.searchRow}>
-        <IconSymbol name="list.bullet" size={16} color="#7D8590" />
+        <IconSymbol name="magnifyingglass" size={16} color="#7D8590" />
         <TextInput
           style={styles.searchInput}
           placeholder="Search frequencies…"
           placeholderTextColor="#7D8590"
           value={search}
           onChangeText={setSearch}
-          returnKeyType="search"
+          returnKeyType="done"
         />
       </View>
 
-      {/* ── Category Filter ─────────────────────────────────────────────── */}
-      <View style={styles.catRow}>
+      {/* ── Category chips ─────────────────────────────────────────────── */}
+      <View style={styles.chipRow}>
         {(["All", ...CATEGORIES] as (FrequencyCategory | "All")[]).map((cat) => (
           <Pressable
             key={cat}
             style={[
-              styles.catBtn,
+              styles.chip,
               activeCategory === cat && {
                 backgroundColor:
-                  cat === "All"
-                    ? "#2ECC9A22"
-                    : CATEGORY_COLORS[cat as FrequencyCategory] + "22",
+                  cat === "All" ? "#2ECC9A22" : CATEGORY_COLORS[cat as FrequencyCategory] + "22",
                 borderColor:
                   cat === "All" ? "#2ECC9A" : CATEGORY_COLORS[cat as FrequencyCategory],
               },
@@ -212,7 +214,7 @@ export default function FrequenciesScreen() {
           >
             <Text
               style={[
-                styles.catBtnText,
+                styles.chipText,
                 activeCategory === cat && {
                   color:
                     cat === "All" ? "#2ECC9A" : CATEGORY_COLORS[cat as FrequencyCategory],
@@ -230,165 +232,81 @@ export default function FrequenciesScreen() {
         data={filtered}
         keyExtractor={(item) => item.id}
         renderItem={renderItem}
-        contentContainerStyle={{ padding: 16, paddingBottom: 32 }}
+        contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: 32 }}
         showsVerticalScrollIndicator={false}
-        ListEmptyComponent={
-          <Text style={styles.emptyText}>No frequencies match your search.</Text>
-        }
+        ItemSeparatorComponent={() => <View style={{ height: 8 }} />}
       />
     </ScreenContainer>
   );
 }
 
 const styles = StyleSheet.create({
-  header: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    paddingHorizontal: 16,
-    paddingTop: 16,
-    paddingBottom: 8,
-  },
-  title: {
-    fontSize: 22,
-    fontWeight: "800",
-    color: "#E6EDF3",
-  },
-  activeCount: {
-    backgroundColor: "#2ECC9A22",
-    borderRadius: 12,
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderWidth: 1,
-    borderColor: "#2ECC9A",
-  },
-  activeCountText: {
-    fontSize: 12,
-    color: "#2ECC9A",
-    fontWeight: "700",
-  },
+  header: { paddingHorizontal: 16, paddingTop: 16, paddingBottom: 8 },
+  title: { fontSize: 22, fontWeight: "800", color: "#E6EDF3" },
+  subtitle: { fontSize: 12, color: "#7D8590", marginTop: 2 },
   searchRow: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 8,
     marginHorizontal: 16,
-    marginBottom: 8,
+    marginBottom: 10,
     backgroundColor: "#161B22",
     borderRadius: 10,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
     borderWidth: 1,
     borderColor: "#30363D",
+    paddingHorizontal: 12,
+    gap: 8,
   },
   searchInput: {
     flex: 1,
+    height: 40,
     color: "#E6EDF3",
     fontSize: 14,
   },
-  catRow: {
+  chipRow: {
     flexDirection: "row",
     flexWrap: "wrap",
     gap: 6,
     paddingHorizontal: 16,
-    marginBottom: 8,
+    marginBottom: 12,
   },
-  catBtn: {
+  chip: {
+    paddingHorizontal: 12,
+    paddingVertical: 5,
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: "#30363D",
+  },
+  chipText: { fontSize: 11, fontWeight: "600", color: "#7D8590" },
+  card: {
+    flexDirection: "row",
+    backgroundColor: "#161B22",
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: "#30363D",
+    overflow: "hidden",
+  },
+  catDot: { width: 4 },
+  cardBody: { flex: 1, padding: 12 },
+  cardTop: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    marginBottom: 4,
+  },
+  freqName: { fontSize: 14, fontWeight: "700", color: "#E6EDF3", flex: 1 },
+  freqHz: { fontSize: 13, fontWeight: "800", marginLeft: 8 },
+  freqEffect: { fontSize: 12, color: "#C9D1D9", lineHeight: 17, marginBottom: 2 },
+  freqSource: { fontSize: 10, color: "#7D8590", fontStyle: "italic", marginBottom: 8 },
+  cardActions: { flexDirection: "row", gap: 8 },
+  actionBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
     paddingHorizontal: 10,
     paddingVertical: 5,
     borderRadius: 8,
     borderWidth: 1,
     borderColor: "#30363D",
   },
-  catBtnText: {
-    fontSize: 11,
-    color: "#7D8590",
-    fontWeight: "600",
-  },
-  freqCard: {
-    backgroundColor: "#161B22",
-    borderRadius: 12,
-    padding: 14,
-    marginBottom: 10,
-    borderLeftWidth: 1,
-    borderLeftColor: "#30363D",
-  },
-  freqHeader: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-    marginBottom: 6,
-  },
-  catBadge: {
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-    borderRadius: 6,
-  },
-  catBadgeText: {
-    fontSize: 10,
-    fontWeight: "700",
-    textTransform: "uppercase",
-    letterSpacing: 0.5,
-  },
-  freqHz: {
-    fontSize: 16,
-    fontWeight: "800",
-    color: "#E6EDF3",
-  },
-  freqName: {
-    fontSize: 14,
-    fontWeight: "700",
-    color: "#E6EDF3",
-    marginBottom: 4,
-  },
-  freqEffect: {
-    fontSize: 12,
-    color: "#7D8590",
-    lineHeight: 17,
-    marginBottom: 4,
-  },
-  freqSource: {
-    fontSize: 10,
-    color: "#30363D",
-    fontStyle: "italic",
-    marginBottom: 10,
-  },
-  freqActions: {
-    flexDirection: "row",
-    gap: 8,
-  },
-  previewBtn: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 5,
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: "#30363D",
-  },
-  previewBtnText: {
-    fontSize: 12,
-    fontWeight: "600",
-  },
-  toggleBtn: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 5,
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: "#30363D",
-  },
-  toggleBtnText: {
-    fontSize: 12,
-    fontWeight: "600",
-    color: "#7D8590",
-  },
-  emptyText: {
-    color: "#7D8590",
-    textAlign: "center",
-    marginTop: 40,
-    fontSize: 14,
-  },
+  actionBtnText: { fontSize: 11, fontWeight: "600", color: "#7D8590" },
 });

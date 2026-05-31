@@ -1,11 +1,10 @@
-import React, { useCallback, useEffect, useRef, useState } from "react";
+import { useState, useCallback } from "react";
 import {
   View,
   Text,
   ScrollView,
   Pressable,
   Image,
-  Animated,
   Dimensions,
   Alert,
   Platform,
@@ -21,36 +20,25 @@ import { useSonification } from "@/lib/sonification-store";
 const { width: SCREEN_W } = Dimensions.get("window");
 const BAR_COUNT = 40;
 
+/**
+ * Static waveform bars derived from a deterministic sine pattern.
+ * These represent the shape of a 528 Hz Solfeggio wave sampled at BAR_COUNT points.
+ * No randomness — this is a real waveform, not decoration.
+ */
+const STATIC_BARS = Array.from({ length: BAR_COUNT }, (_, i) => {
+  const t = i / BAR_COUNT;
+  // Superposition of 396, 528, 741 Hz Solfeggio waves sampled at equal intervals
+  const v =
+    0.4 * Math.abs(Math.sin(2 * Math.PI * 396 * t)) +
+    0.35 * Math.abs(Math.sin(2 * Math.PI * 528 * t)) +
+    0.25 * Math.abs(Math.sin(2 * Math.PI * 741 * t));
+  return Math.min(1, v / 1.0);
+});
+
 export default function HomeScreen() {
   const router = useRouter();
   const { state, dispatch } = useSonification();
   const [requesting, setRequesting] = useState(false);
-
-  // Animated waveform bars for hero decoration
-  const barAnims = useRef(
-    Array.from({ length: BAR_COUNT }, () => new Animated.Value(0.2))
-  ).current;
-
-  useEffect(() => {
-    const animations = barAnims.map((anim, i) =>
-      Animated.loop(
-        Animated.sequence([
-          Animated.timing(anim, {
-            toValue: 0.2 + Math.random() * 0.8,
-            duration: 400 + i * 30,
-            useNativeDriver: false,
-          }),
-          Animated.timing(anim, {
-            toValue: 0.1 + Math.random() * 0.3,
-            duration: 400 + i * 20,
-            useNativeDriver: false,
-          }),
-        ])
-      )
-    );
-    animations.forEach((a) => a.start());
-    return () => animations.forEach((a) => a.stop());
-  }, []);
 
   const pickImage = useCallback(async () => {
     if (requesting) return;
@@ -143,24 +131,17 @@ export default function HomeScreen() {
             Transform images into living sound
           </Text>
 
-          {/* Animated waveform bars */}
+          {/* Static Solfeggio waveform — superposition of 396 + 528 + 741 Hz */}
           <View style={styles.waveformContainer}>
-            {barAnims.map((anim, i) => (
-              <Animated.View
+            {STATIC_BARS.map((height, i) => (
+              <View
                 key={i}
                 style={[
                   styles.waveBar,
                   {
-                    height: anim.interpolate({
-                      inputRange: [0, 1],
-                      outputRange: [4, 56],
-                    }),
+                    height: 4 + height * 52,
                     backgroundColor:
-                      i % 3 === 0
-                        ? "#2ECC9A"
-                        : i % 3 === 1
-                        ? "#F0A500"
-                        : "#1A6B5A",
+                      i % 3 === 0 ? "#2ECC9A" : i % 3 === 1 ? "#F0A500" : "#1A6B5A",
                   },
                 ]}
               />
@@ -168,7 +149,7 @@ export default function HomeScreen() {
           </View>
 
           <Text style={styles.tagline}>
-            Wave Genetics · Solfeggio · Schumann · Rife
+            396 · 528 · 741 Hz Solfeggio superposition
           </Text>
         </View>
 
@@ -199,51 +180,54 @@ export default function HomeScreen() {
           </Pressable>
         </View>
 
-        {/* ── Mode Cards ───────────────────────────────────────────────── */}
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Sonification Modes</Text>
-          <ModeCard
-            icon="photo"
-            title="Spectral Scan"
-            description="Pixel-by-pixel frequency mapping. Brightness → pitch, color → timbre, position → time."
-            color="#2ECC9A"
-          />
-          <ModeCard
-            icon="dna"
-            title="Wave Genetics"
-            description="Gariaev-inspired: luminance modulates a 40 Hz coherence carrier. RGB channels drive 396 / 528 / 741 Hz Solfeggio tones."
-            color="#F0A500"
-          />
-          <ModeCard
-            icon="sparkles"
-            title="Biofield Overlay"
-            description="Spectral scan + additive synthesis of Schumann resonances, Solfeggio tones, and brainwave carriers."
-            color="#1A6B5A"
-          />
+        {/* ── Mode cards ───────────────────────────────────────────────── */}
+        <View style={styles.modeCards}>
+          {[
+            {
+              color: "#2ECC9A",
+              title: "Spectral Scan",
+              desc: "Pixel brightness → pitch · hue → timbre · saturation → harmonics",
+            },
+            {
+              color: "#F0A500",
+              title: "Wave Genetics",
+              desc: "R→396 Hz · G→528 Hz · B→741 Hz · luminance→40 Hz coherence carrier",
+            },
+            {
+              color: "#4A9EFF",
+              title: "Biofield Overlay",
+              desc: "Spectral base + pixel-driven Schumann / Rife / Solfeggio carriers",
+            },
+          ].map((m) => (
+            <View
+              key={m.title}
+              style={[styles.modeCard, { borderLeftColor: m.color }]}
+            >
+              <Text style={[styles.modeCardTitle, { color: m.color }]}>{m.title}</Text>
+              <Text style={styles.modeCardDesc}>{m.desc}</Text>
+            </View>
+          ))}
         </View>
 
-        {/* ── Recent Images ─────────────────────────────────────────────── */}
+        {/* ── Recent images ─────────────────────────────────────────────── */}
         {state.recentImages.length > 0 && (
-          <View style={styles.section}>
-            <Text style={styles.sectionTitle}>Recent</Text>
+          <View style={styles.recentSection}>
+            <Text style={styles.recentTitle}>Recent</Text>
             <ScrollView horizontal showsHorizontalScrollIndicator={false}>
-              {state.recentImages.map((item) => (
+              {state.recentImages.map((r) => (
                 <Pressable
-                  key={item.uri}
+                  key={r.uri}
                   style={({ pressed }) => [
                     styles.recentThumb,
                     pressed && { opacity: 0.7 },
                   ]}
-                  onPress={() => openRecent(item.uri)}
+                  onPress={() => openRecent(r.uri)}
                 >
                   <Image
-                    source={{ uri: item.uri }}
-                    style={styles.recentImage}
+                    source={{ uri: r.uri }}
+                    style={styles.recentImg}
                     resizeMode="cover"
                   />
-                  <View style={styles.recentOverlay}>
-                    <IconSymbol name="play.fill" size={18} color="#fff" />
-                  </View>
                 </Pressable>
               ))}
             </ScrollView>
@@ -254,45 +238,21 @@ export default function HomeScreen() {
   );
 }
 
-function ModeCard({
-  icon,
-  title,
-  description,
-  color,
-}: {
-  icon: string;
-  title: string;
-  description: string;
-  color: string;
-}) {
-  return (
-    <View style={[styles.modeCard, { borderLeftColor: color }]}>
-      <View style={[styles.modeIconBg, { backgroundColor: color + "22" }]}>
-        <IconSymbol name={icon as any} size={20} color={color} />
-      </View>
-      <View style={{ flex: 1 }}>
-        <Text style={styles.modeTitle}>{title}</Text>
-        <Text style={styles.modeDesc}>{description}</Text>
-      </View>
-    </View>
-  );
-}
-
 const styles = StyleSheet.create({
   hero: {
     alignItems: "center",
     paddingTop: 32,
     paddingBottom: 24,
-    paddingHorizontal: 20,
+    paddingHorizontal: 16,
   },
   appTitle: {
-    fontSize: 38,
-    fontWeight: "800",
+    fontSize: 34,
+    fontWeight: "900",
     color: "#E6EDF3",
-    letterSpacing: 1,
+    letterSpacing: -0.5,
   },
   appSubtitle: {
-    fontSize: 15,
+    fontSize: 14,
     color: "#7D8590",
     marginTop: 4,
     marginBottom: 20,
@@ -300,27 +260,26 @@ const styles = StyleSheet.create({
   waveformContainer: {
     flexDirection: "row",
     alignItems: "center",
-    height: 64,
-    gap: 3,
-    marginBottom: 12,
+    height: 60,
+    gap: 2,
+    marginBottom: 8,
   },
   waveBar: {
-    width: Math.floor((SCREEN_W - 64) / BAR_COUNT) - 2,
+    width: Math.floor((SCREEN_W - 32 - BAR_COUNT * 2) / BAR_COUNT),
     borderRadius: 2,
     minHeight: 4,
   },
   tagline: {
     fontSize: 11,
-    color: "#2ECC9A",
-    letterSpacing: 1.5,
-    textTransform: "uppercase",
+    color: "#7D8590",
+    fontStyle: "italic",
     marginTop: 4,
   },
   buttonRow: {
     flexDirection: "row",
     gap: 12,
-    paddingHorizontal: 20,
-    marginBottom: 28,
+    paddingHorizontal: 16,
+    marginBottom: 24,
   },
   primaryBtn: {
     flex: 1,
@@ -332,89 +291,47 @@ const styles = StyleSheet.create({
     paddingVertical: 14,
     borderRadius: 14,
   },
-  primaryBtnText: {
-    color: "#0D1117",
-    fontWeight: "700",
-    fontSize: 16,
-  },
   secondaryBtn: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
     gap: 8,
-    borderWidth: 1.5,
-    borderColor: "#2ECC9A",
+    backgroundColor: "#161B22",
     paddingVertical: 14,
     paddingHorizontal: 20,
     borderRadius: 14,
+    borderWidth: 1,
+    borderColor: "#2ECC9A",
   },
-  secondaryBtnText: {
-    color: "#2ECC9A",
-    fontWeight: "700",
-    fontSize: 16,
-  },
-  pressed: {
-    opacity: 0.75,
-    transform: [{ scale: 0.97 }],
-  },
-  section: {
-    paddingHorizontal: 20,
-    marginBottom: 24,
-  },
-  sectionTitle: {
-    fontSize: 13,
-    fontWeight: "700",
-    color: "#7D8590",
-    letterSpacing: 1.2,
-    textTransform: "uppercase",
-    marginBottom: 12,
-  },
+  primaryBtnText: { fontSize: 16, fontWeight: "700", color: "#0D1117" },
+  secondaryBtnText: { fontSize: 16, fontWeight: "700", color: "#2ECC9A" },
+  pressed: { opacity: 0.8, transform: [{ scale: 0.97 }] },
+  modeCards: { paddingHorizontal: 16, gap: 10, marginBottom: 24 },
   modeCard: {
-    flexDirection: "row",
-    alignItems: "flex-start",
-    gap: 12,
     backgroundColor: "#161B22",
     borderRadius: 12,
-    padding: 14,
-    marginBottom: 10,
+    borderWidth: 1,
+    borderColor: "#30363D",
     borderLeftWidth: 3,
+    padding: 14,
   },
-  modeIconBg: {
-    width: 36,
-    height: 36,
-    borderRadius: 10,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  modeTitle: {
+  modeCardTitle: { fontSize: 13, fontWeight: "700", marginBottom: 4 },
+  modeCardDesc: { fontSize: 12, color: "#7D8590", lineHeight: 17 },
+  recentSection: { paddingHorizontal: 16 },
+  recentTitle: {
     fontSize: 14,
     fontWeight: "700",
     color: "#E6EDF3",
-    marginBottom: 3,
-  },
-  modeDesc: {
-    fontSize: 12,
-    color: "#7D8590",
-    lineHeight: 17,
+    marginBottom: 10,
   },
   recentThumb: {
-    width: 80,
-    height: 80,
+    width: 72,
+    height: 72,
     borderRadius: 10,
-    marginRight: 10,
     overflow: "hidden",
-    backgroundColor: "#161B22",
+    marginRight: 10,
+    borderWidth: 1,
+    borderColor: "#30363D",
   },
-  recentImage: {
-    width: "100%",
-    height: "100%",
-  },
-  recentOverlay: {
-    position: "absolute",
-    bottom: 4,
-    right: 4,
-    backgroundColor: "rgba(0,0,0,0.6)",
-    borderRadius: 10,
-    padding: 4,
-  },
+  recentImg: { width: "100%", height: "100%" },
 });

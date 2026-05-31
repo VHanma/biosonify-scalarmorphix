@@ -1,3 +1,4 @@
+import "@/lib/polyfills"; // MUST be first — installs btoa/atob on Android Hermes
 import { DarkTheme, DefaultTheme, ThemeProvider as NavThemeProvider } from "@react-navigation/native";
 import { Stack } from "expo-router";
 import * as SplashScreen from "expo-splash-screen";
