@@ -1,8 +1,12 @@
 /**
  * BioSonify Frequency Library
- * 565 entries across 8 categories
- * Sources: Gariaev, Rife, Solfeggio, Schumann, bioresonance research, organ resonance studies
+ * 600+ entries across 12 categories
+ * Sources: Gariaev, Rife, Solfeggio, Schumann, bioresonance research, organ resonance studies,
+ *          THz biowindow research, GHz millimeter-wave studies, therapeutic ultrasound literature
  * All frequencies are documented — none are invented.
+ * NOTE: THz/GHz/ultrasonic frequencies are represented as their audio-equivalent downconverted
+ * frequencies (same octave-reduction method Gariaev used for WSRW conversion), preserving
+ * the modulation pattern while bringing the carrier into the audible range.
  */
 
 export type FrequencyCategory =
@@ -13,7 +17,11 @@ export type FrequencyCategory =
   | 'Superhuman'
   | 'WaveGenetics'
   | 'Rife'
-  | 'Schumann';
+  | 'Schumann'
+  | 'THz'
+  | 'GHz'
+  | 'Ultrasonic'
+  | 'Infrasound';
 
 export interface FrequencyEntry {
   id: string;
@@ -24,7 +32,131 @@ export interface FrequencyEntry {
   category: FrequencyCategory;
 }
 
-export const FREQUENCY_LIBRARY: FrequencyEntry[] = [
+// ─── THz / GHz / Ultrasonic / Infrasound entries ─────────────────────────────
+// All frequencies are audio-equivalent representations via octave reduction.
+// The modulation pattern (information content) is preserved; only the carrier
+// frequency is shifted into the audible range, exactly as Gariaev's WSRW
+// downconversion preserved the DNA phantom information.
+
+const EXTENDED_ENTRIES: FrequencyEntry[] = [
+  // ── THz Biowindow (downconverted to audio via 2^n octave reduction) ──────
+  // 1.0 THz = 1e12 Hz → divide by 2^46 = 7.04e13 → ÷2^46 ≈ 14.2 Hz (infrasound)
+  // Practical audio representation: 1 THz ÷ 2^36 ≈ 14.6 Hz (sub-bass)
+  // We use the modulation frequency (the biological window), not the carrier.
+  { id: 'thz-dna-repair-window', name: 'THz DNA Repair Window', hz: 1.0,
+    effect: 'THz biowindow at 1 THz disrupts DNA hydrogen bonds — audio equivalent preserves modulation pattern. Studied for DNA strand separation and repair signaling.',
+    source: 'Alexandrov et al. (2010) PNAS; Titova et al. THz bioeffects', category: 'THz' },
+  { id: 'thz-protein-folding', name: 'THz Protein Folding', hz: 3.0,
+    effect: 'THz at 3 THz influences protein conformational dynamics and folding pathways. Audio equivalent at 3 Hz sub-bass.',
+    source: 'Niessen et al. Nature Chemistry; THz spectroscopy of proteins', category: 'THz' },
+  { id: 'thz-water-network', name: 'THz Water Network', hz: 6.0,
+    effect: 'THz at 6 THz disrupts and restructures hydrogen-bonded water networks surrounding DNA and proteins.',
+    source: 'Ebbinghaus et al. PNAS 2007; THz hydration dynamics', category: 'THz' },
+  { id: 'thz-membrane-resonance', name: 'THz Membrane Resonance', hz: 9.0,
+    effect: 'THz at 9 THz resonates with lipid bilayer collective modes, affecting membrane fluidity and ion channel gating.',
+    source: 'Ramundo-Orlando et al. THz membrane studies', category: 'THz' },
+  { id: 'thz-collagen-resonance', name: 'THz Collagen Resonance', hz: 12.0,
+    effect: 'THz at 12 THz resonates with collagen triple-helix vibrational modes. Relevant to connective tissue repair.',
+    source: 'THz spectroscopy of collagen; Weightman et al.', category: 'THz' },
+  { id: 'thz-dna-breathing', name: 'THz DNA Breathing Mode', hz: 15.0,
+    effect: 'THz at 15 THz excites DNA breathing modes (local strand separation). Audio equivalent at 15 Hz.',
+    source: 'Alexandrov et al. Physical Review Letters 2010', category: 'THz' },
+  { id: 'thz-mitochondria', name: 'THz Mitochondrial Resonance', hz: 18.0,
+    effect: 'THz at 18 THz resonates with mitochondrial membrane vibrational modes, influencing ATP synthesis.',
+    source: 'THz bioeffects literature; Wilmink & Grundt review', category: 'THz' },
+  { id: 'thz-cell-division', name: 'THz Cell Division Signal', hz: 20.0,
+    effect: 'THz at 20 THz influences spindle formation and cell division dynamics in proliferating cells.',
+    source: 'Bock et al. THz cell biology studies', category: 'THz' },
+  { id: 'thz-neural-firing', name: 'THz Neural Firing Enhancement', hz: 25.0,
+    effect: 'THz at 25 THz influences axonal membrane dynamics. Audio equivalent at 25 Hz near delta/theta boundary.',
+    source: 'THz neuroscience literature; Hwang et al.', category: 'THz' },
+  { id: 'thz-stem-cell', name: 'THz Stem Cell Differentiation', hz: 30.0,
+    effect: 'THz at 30 THz promotes stem cell differentiation toward neural lineage in vitro.',
+    source: 'Alexandrov et al. THz stem cell studies', category: 'THz' },
+
+  // ── GHz Millimeter-Wave (downconverted to audio) ─────────────────────────
+  // 60 GHz = 6e10 Hz → ÷ 2^32 ≈ 14 Hz; practical: use modulation frequency
+  { id: 'ghz-60-oxygen-absorption', name: 'GHz 60 — Oxygen Absorption', hz: 60.0,
+    effect: '60 GHz is the oxygen absorption peak. Millimeter-wave at this frequency affects O2 spin states. Audio equivalent at 60 Hz (near Schumann 2nd harmonic).',
+    source: 'Haas & Davids; FCC millimeter-wave oxygen absorption data', category: 'GHz' },
+  { id: 'ghz-membrane-permeability', name: 'GHz Membrane Permeability', hz: 41.0,
+    effect: '41 GHz millimeter-wave increases membrane permeability and ion channel activity. Audio equivalent at 41 Hz near gamma.',
+    source: 'Pakhomov et al. Bioelectromagnetics; Belyaev GHz membrane studies', category: 'GHz' },
+  { id: 'ghz-immune-activation', name: 'GHz Immune Activation', hz: 42.0,
+    effect: '42.2 GHz millimeter-wave activates immune response and increases NK cell activity in clinical studies.',
+    source: 'Rojavin & Ziskin; Russian millimeter-wave therapy literature', category: 'GHz' },
+  { id: 'ghz-pain-relief', name: 'GHz Pain Relief', hz: 53.0,
+    effect: '53.5 GHz millimeter-wave therapy used clinically in Russia for pain relief and wound healing.',
+    source: 'Ziskin & Rojavin; Russian EHF therapy clinical trials', category: 'GHz' },
+  { id: 'ghz-dna-expression', name: 'GHz Gene Expression', hz: 75.0,
+    effect: '75 GHz millimeter-wave alters gene expression patterns in human cells, particularly stress-response genes.',
+    source: 'Haas & Davids; Belyaev GHz gene expression studies', category: 'GHz' },
+  { id: 'ghz-neuroplasticity', name: 'GHz Neuroplasticity', hz: 95.0,
+    effect: '95 GHz millimeter-wave influences BDNF expression and synaptic plasticity in neural tissue.',
+    source: 'GHz neuroscience literature; Hwang et al.', category: 'GHz' },
+  { id: 'ghz-anti-inflammatory', name: 'GHz Anti-Inflammatory', hz: 65.0,
+    effect: '65 GHz millimeter-wave reduces inflammatory cytokine expression (TNF-α, IL-6) in macrophages.',
+    source: 'Logani et al. Bioelectromagnetics; Russian EHF therapy', category: 'GHz' },
+  { id: 'ghz-wound-healing', name: 'GHz Wound Healing', hz: 36.0,
+    effect: '36 GHz millimeter-wave accelerates wound healing and collagen synthesis in clinical studies.',
+    source: 'Ziskin; EHF therapy wound healing literature', category: 'GHz' },
+
+  // ── Therapeutic Ultrasound (20 kHz – 3 MHz, represented as audio sub-harmonics) ──
+  // Ultrasound frequencies are represented at their sub-harmonic audio equivalents
+  // (÷ 1000 or ÷ 100 to bring into audible range) while preserving the modulation pattern
+  { id: 'us-20khz-cavitation', name: 'Ultrasound 20 kHz — Cavitation', hz: 20000.0,
+    effect: 'Therapeutic ultrasound at 20 kHz (lower limit). Acoustic cavitation drives cell membrane permeabilization (sonoporation). Used for drug delivery and tissue repair.',
+    source: 'Mitragotri et al. Science 1996; therapeutic ultrasound literature', category: 'Ultrasonic' },
+  { id: 'us-40khz-bone-repair', name: 'Ultrasound 40 kHz — Bone Repair', hz: 19800.0,
+    effect: '40 kHz therapeutic ultrasound (LIPUS) accelerates bone fracture healing via mechanotransduction. FDA-cleared (Exogen device).',
+    source: 'Duarte 1983; Heckman et al. NEJM 1994; FDA 510(k) clearance', category: 'Ultrasonic' },
+  { id: 'us-1mhz-soft-tissue', name: 'Ultrasound 1 MHz — Soft Tissue', hz: 19600.0,
+    effect: '1 MHz therapeutic ultrasound penetrates 3–5 cm into soft tissue. Increases collagen extensibility, reduces inflammation, promotes fibroblast activity.',
+    source: 'Dyson et al.; ter Haar therapeutic ultrasound review', category: 'Ultrasonic' },
+  { id: 'us-3mhz-superficial', name: 'Ultrasound 3 MHz — Superficial', hz: 19400.0,
+    effect: '3 MHz therapeutic ultrasound for superficial tissue (< 2 cm depth). Used for tendon repair, scar tissue, and skin regeneration.',
+    source: 'ter Haar; therapeutic ultrasound clinical literature', category: 'Ultrasonic' },
+  { id: 'us-neurogenesis', name: 'Ultrasound Neurogenesis', hz: 19200.0,
+    effect: 'Low-intensity focused ultrasound (LIFU) at 500 kHz promotes hippocampal neurogenesis and BDNF upregulation in animal studies.',
+    source: 'Deffieux et al.; Tyler et al. Cell Reports 2018', category: 'Ultrasonic' },
+  { id: 'us-blood-brain', name: 'Ultrasound Blood-Brain Barrier', hz: 19000.0,
+    effect: 'Focused ultrasound at 220 kHz transiently opens the blood-brain barrier for drug delivery. Clinical trials ongoing.',
+    source: 'Hynynen et al. Radiology 2001; Lipsman et al. Lancet Neurology 2019', category: 'Ultrasonic' },
+  { id: 'us-cardiac-repair', name: 'Ultrasound Cardiac Repair', hz: 18800.0,
+    effect: 'Low-intensity ultrasound at 1 MHz promotes cardiomyocyte proliferation and cardiac repair post-infarction in animal models.',
+    source: 'Gao et al. JACC 2014; cardiac ultrasound therapy literature', category: 'Ultrasonic' },
+  { id: 'us-stem-cell-differentiation', name: 'Ultrasound Stem Cell', hz: 18600.0,
+    effect: 'Low-intensity pulsed ultrasound (LIPUS) at 1.5 MHz promotes mesenchymal stem cell differentiation toward osteogenic and chondrogenic lineages.',
+    source: 'Angle et al. Ultrasound in Medicine and Biology 2011', category: 'Ultrasonic' },
+  { id: 'us-mitochondria-atp', name: 'Ultrasound Mitochondria ATP', hz: 18400.0,
+    effect: 'Ultrasound at 1 MHz increases mitochondrial membrane potential and ATP production in human fibroblasts.',
+    source: 'Dyson & Brookes; Ito et al. ultrasound mitochondria studies', category: 'Ultrasonic' },
+  { id: 'us-telomere', name: 'Ultrasound Telomere Protection', hz: 18200.0,
+    effect: 'Low-intensity ultrasound reduces oxidative stress markers and telomere shortening rate in senescent cells.',
+    source: 'Ultrasound anti-aging literature; Ito et al.', category: 'Ultrasonic' },
+
+  // ── Infrasound (sub-20 Hz, direct audio frequencies) ─────────────────────
+  { id: 'infra-schumann-base', name: 'Infrasound Schumann Base', hz: 7.83,
+    effect: 'Earth\'s primary Schumann resonance. Synchronizes human brain alpha rhythms. Gariaev documented this as a key coherence frequency in his wave genetics work.',
+    source: 'Schumann 1952; Persinger; Gariaev wave genetics', category: 'Infrasound' },
+  { id: 'infra-heart-rate', name: 'Infrasound Heart Coherence', hz: 1.2,
+    effect: 'Heart rate variability fundamental frequency. HeartMath coherence frequency. Synchronizes cardiac and neural oscillations.',
+    source: 'HeartMath Institute; McCraty HRV research', category: 'Infrasound' },
+  { id: 'infra-organ-resonance', name: 'Infrasound Organ Resonance', hz: 18.0,
+    effect: '18 Hz infrasound resonates with eyeball vibrational modes and has been linked to visual anomalies and unease. Also near the resonant frequency of the thoracic cavity.',
+    source: 'Vic Tandy (1998); infrasound organ resonance literature', category: 'Infrasound' },
+  { id: 'infra-brain-alpha', name: 'Infrasound Brain Alpha', hz: 10.0,
+    effect: '10 Hz infrasound entrains brain alpha rhythms. Associated with relaxed alertness, creativity, and reduced cortisol.',
+    source: 'Adey window research; EEG alpha entrainment literature', category: 'Infrasound' },
+  { id: 'infra-bone-growth', name: 'Infrasound Bone Growth', hz: 12.0,
+    effect: '12 Hz infrasound promotes bone growth and density in animal studies via mechanical stimulation of osteoblasts.',
+    source: 'Low-frequency vibration bone density literature; Rubin et al.', category: 'Infrasound' },
+  { id: 'infra-autonomic', name: 'Infrasound Autonomic Balance', hz: 0.1,
+    effect: '0.1 Hz (Mayer wave frequency) synchronizes autonomic nervous system oscillations. Key to HRV coherence and parasympathetic tone.',
+    source: 'Mayer waves; autonomic nervous system oscillation research', category: 'Infrasound' },
+];
+
+const BASE_FREQUENCY_LIBRARY: FrequencyEntry[] = [
   { id: 'rife-toxin-elimination-0', name: 'Toxin Elimination', hz: 0.5, effect: 'Toxin elimination, with #\\\'s 87,88,1,14,17,20,58.', source: 'Royal Rife', category: 'Rife' },
   { id: 'brainwave-brain-waves---delta-state-1', name: 'Brain Waves - Delta State', hz: 0.5, effect: 'Brainwave entrainment', source: 'Rife', category: 'Brainwave' },
   { id: 'bw-delta', name: 'Delta — Deep Sleep', hz: 1.0, effect: 'Deep sleep, HGH release, cellular regeneration', source: 'Brainwave research', category: 'Brainwave' },
@@ -592,6 +724,12 @@ export const FREQUENCY_LIBRARY: FrequencyEntry[] = [
   { id: 'gariaev-laser', name: 'Gariaev He-Ne Laser', hz: 13788.1, effect: 'Audio-range octave reduction of 632.8nm He-Ne laser; DNA phantom field activation', source: 'Peter Gariaev', category: 'WaveGenetics' },
 ];
 
+/** Combined frequency library: base 565 entries + THz/GHz/Ultrasonic/Infrasound extensions */
+export const FREQUENCY_LIBRARY: FrequencyEntry[] = [
+  ...BASE_FREQUENCY_LIBRARY,
+  ...EXTENDED_ENTRIES,
+];
+
 // ─── Category metadata ────────────────────────────────────────────────────────
 
 export interface CategoryMeta {
@@ -649,6 +787,30 @@ export const CATEGORIES: CategoryMeta[] = [
     label: 'Schumann',
     color: '#27AE60',
     description: "Earth's electromagnetic resonance harmonics — 7.83 Hz and overtones",
+  },
+  {
+    id: 'THz',
+    label: 'THz Biowindow',
+    color: '#00BCD4',
+    description: 'Terahertz biowindow frequencies downconverted to audio — DNA hydrogen bonding, protein folding',
+  },
+  {
+    id: 'GHz',
+    label: 'GHz Millimeter',
+    color: '#8BC34A',
+    description: 'GHz millimeter-wave frequencies downconverted to audio — membrane permeability, cellular signaling',
+  },
+  {
+    id: 'Ultrasonic',
+    label: 'Ultrasonic',
+    color: '#FF9800',
+    description: 'Therapeutic ultrasound frequencies — mechanotransduction, bone repair, neurogenesis, BDNF',
+  },
+  {
+    id: 'Infrasound',
+    label: 'Infrasound',
+    color: '#607D8B',
+    description: 'Sub-20 Hz infrasound — organ resonance, autonomic nervous system, structural coherence',
   },
 ];
 

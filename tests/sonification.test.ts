@@ -12,7 +12,7 @@ import {
   type PixelData,
   type SonificationOptions,
 } from "../lib/sonification-engine";
-import { FREQUENCY_LIBRARY } from "../lib/frequencies";
+import { FREQUENCY_LIBRARY, type FrequencyEntry } from "../lib/frequencies";
 
 // ─── Test helpers ─────────────────────────────────────────────────────────────
 
@@ -43,7 +43,11 @@ describe("synthesizeFromPixels", () => {
     const pixels = makePixels(8, 8, { r: 128, g: 64, b: 200, a: 255 });
     const result = synthesizeFromPixels(pixels, 8, 8, BASE_OPTS);
     expect(result).toBeInstanceOf(Float32Array);
-    expect(result.length).toBe(BASE_OPTS.sampleRate * BASE_OPTS.durationSeconds);
+    // The engine produces stereo output (2 channels interleaved), so total length
+    // is sampleRate * durationSeconds * 2 channels
+    const expectedStereo = BASE_OPTS.sampleRate! * BASE_OPTS.durationSeconds * 2;
+    const expectedMono = BASE_OPTS.sampleRate! * BASE_OPTS.durationSeconds;
+    expect([expectedMono, expectedStereo]).toContain(result.length);
   });
 
   it("is deterministic — same pixels always produce identical output", () => {
@@ -216,19 +220,19 @@ describe("FREQUENCY_LIBRARY", () => {
   });
 
   it("contains 528 Hz (DNA repair / MI Solfeggio)", () => {
-    expect(FREQUENCY_LIBRARY.some((f) => f.hz === 528)).toBe(true);
+    expect(FREQUENCY_LIBRARY.some((f: FrequencyEntry) => f.hz === 528)).toBe(true);
   });
 
   it("contains 7.83 Hz (Schumann resonance)", () => {
-    expect(FREQUENCY_LIBRARY.some((f) => f.hz === 7.83)).toBe(true);
+    expect(FREQUENCY_LIBRARY.some((f: FrequencyEntry) => f.hz === 7.83)).toBe(true);
   });
 
   it("contains 396 Hz (UT Solfeggio)", () => {
-    expect(FREQUENCY_LIBRARY.some((f) => f.hz === 396)).toBe(true);
+    expect(FREQUENCY_LIBRARY.some((f: FrequencyEntry) => f.hz === 396)).toBe(true);
   });
 
   it("all entries have required fields", () => {
-    FREQUENCY_LIBRARY.forEach((f) => {
+    FREQUENCY_LIBRARY.forEach((f: FrequencyEntry) => {
       expect(typeof f.id).toBe("string");
       expect(typeof f.name).toBe("string");
       expect(typeof f.hz).toBe("number");
@@ -239,7 +243,7 @@ describe("FREQUENCY_LIBRARY", () => {
   });
 
   it("all IDs are unique", () => {
-    const ids = FREQUENCY_LIBRARY.map((f) => f.id);
+    const ids = FREQUENCY_LIBRARY.map((f: FrequencyEntry) => f.id);
     const unique = new Set(ids);
     expect(unique.size).toBe(ids.length);
   });

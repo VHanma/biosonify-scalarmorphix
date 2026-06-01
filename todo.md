@@ -54,14 +54,32 @@
 - [x] Add share button on save screen (share via system share sheet)
 
 ## APK Crash Fix (v6)
-- [ ] Audit every startup-time import for Android/Hermes incompatibility
-- [ ] Remove or replace any web-only API used at module load time
-- [ ] Ensure polyfills load before any other module
-- [ ] Replace AudioContext / Web Audio API with expo-audio only
-- [ ] Ensure all WAV generation writes to file:// not data: URIs
-- [ ] Verify expo-image-manipulator usage is Android-safe
-- [ ] Verify expo-media-library is correctly registered in app.config.ts
-- [ ] Verify expo-image-picker version matches SDK 54
-- [ ] Run TypeScript check: 0 errors
-- [ ] Run all tests: 25/25 pass
-- [ ] Confirm dev preview loads without white/black screen
+- [x] Audit every startup-time import for Android/Hermes incompatibility
+- [x] Remove or replace any web-only API used at module load time
+- [x] Ensure polyfills load before any other module
+- [x] Replace AudioContext / Web Audio API with expo-audio only
+- [x] Ensure all WAV generation writes to file:// not data: URIs
+- [x] Verify expo-image-manipulator usage is Android-safe
+- [x] Verify expo-media-library is correctly registered in app.config.ts
+- [x] Verify expo-image-picker version matches SDK 54
+- [x] Run TypeScript check: 0 errors
+- [x] Run all tests: 25/25 pass
+- [x] Confirm dev preview loads without white/black screen
+
+## Gariaev Signal Chain Rebuild (v7)
+- [ ] Analyze all 6 Gariaev matrix YouTube recordings for acoustic character
+- [ ] Research exact He-Ne 632.8nm / 660nm / 950nm laser parameters and WSRW downconversion
+- [ ] Build WSRW downconversion math model (optical freq → radio → audio)
+- [ ] Implement dual orthogonal polarization modes (H and V channels → stereo)
+- [ ] Implement spatial feature modulation from image scan (per-column polarization angle)
+- [ ] Rebuild Wave Genetics engine with correct physics
+- [ ] Add polarization-based stereo encoding (H-pol = left channel, V-pol = right channel)
+- [ ] Verify deterministic output — same image always same sound
+
+## THz / GHz / Ultrasonic Biofrequency Integration (v7 continued)
+- [ ] Research THz window frequencies that affect DNA hydrogen bonding and protein folding
+- [ ] Research GHz millimeter-wave frequencies affecting membrane permeability and cellular signaling
+- [ ] Research therapeutic ultrasound frequencies (20kHz–3MHz) for mechanotransduction, bone repair, neurogenesis, BDNF
+- [ ] Research infrasound and low-frequency acoustic bioeffects
+- [ ] Add all new entries to FREQUENCY_LIBRARY with correct downconversion to audible equivalents
+- [ ] Add THz, GHz, Ultrasonic categories to frequency library screen
