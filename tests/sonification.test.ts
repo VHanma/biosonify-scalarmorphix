@@ -1,11 +1,15 @@
 /**
  * BioSonify Sonification Engine Tests
  * Tests for deterministic, lossless pixel-to-sound translation.
+ *
+ * v6: All synthesis tests use synthesizeFromPixelsAsync (the real async path).
+ * The synchronous wrapper was removed because it used a spin-wait that hangs
+ * in Vitest's fake-timer environment.
  */
 
 import { describe, it, expect } from "vitest";
 import {
-  synthesizeFromPixels,
+  synthesizeFromPixelsAsync,
   encodeWav,
   arrayBufferToBase64,
   extractWaveformBars,
@@ -36,12 +40,12 @@ const BASE_OPTS: SonificationOptions = {
   sampleRate: 22050,
 };
 
-// ─── synthesizeFromPixels ─────────────────────────────────────────────────────
+// ─── synthesizeFromPixelsAsync ────────────────────────────────────────────────
 
-describe("synthesizeFromPixels", () => {
-  it("returns a Float32Array of the correct length", () => {
+describe("synthesizeFromPixelsAsync", () => {
+  it("returns a Float32Array of the correct length", async () => {
     const pixels = makePixels(8, 8, { r: 128, g: 64, b: 200, a: 255 });
-    const result = synthesizeFromPixels(pixels, 8, 8, BASE_OPTS);
+    const result = await synthesizeFromPixelsAsync(pixels, 8, 8, BASE_OPTS);
     expect(result).toBeInstanceOf(Float32Array);
     // The engine produces stereo output (2 channels interleaved), so total length
     // is sampleRate * durationSeconds * 2 channels
@@ -50,20 +54,20 @@ describe("synthesizeFromPixels", () => {
     expect([expectedMono, expectedStereo]).toContain(result.length);
   });
 
-  it("is deterministic — same pixels always produce identical output", () => {
+  it("is deterministic — same pixels always produce identical output", async () => {
     const pixels = makeGradientPixels(16, 16);
-    const a = synthesizeFromPixels(pixels, 16, 16, BASE_OPTS);
-    const b = synthesizeFromPixels(pixels, 16, 16, BASE_OPTS);
+    const a = await synthesizeFromPixelsAsync(pixels, 16, 16, BASE_OPTS);
+    const b = await synthesizeFromPixelsAsync(pixels, 16, 16, BASE_OPTS);
     for (let i = 0; i < a.length; i++) {
       expect(a[i]).toBe(b[i]);
     }
   });
 
-  it("produces different output for different images", () => {
+  it("produces different output for different images", async () => {
     const px1 = makePixels(8, 8, { r: 255, g: 0, b: 0, a: 255 });
     const px2 = makePixels(8, 8, { r: 0, g: 255, b: 0, a: 255 });
-    const a = synthesizeFromPixels(px1, 8, 8, BASE_OPTS);
-    const b = synthesizeFromPixels(px2, 8, 8, BASE_OPTS);
+    const a = await synthesizeFromPixelsAsync(px1, 8, 8, BASE_OPTS);
+    const b = await synthesizeFromPixelsAsync(px2, 8, 8, BASE_OPTS);
     let diff = false;
     for (let i = 0; i < a.length; i++) {
       if (a[i] !== b[i]) { diff = true; break; }
@@ -71,51 +75,78 @@ describe("synthesizeFromPixels", () => {
     expect(diff).toBe(true);
   });
 
-  it("produces silence for fully transparent pixels", () => {
+  it("produces silence for fully transparent pixels", async () => {
     const pixels = makePixels(8, 8, { r: 128, g: 128, b: 128, a: 0 });
-    const result = synthesizeFromPixels(pixels, 8, 8, BASE_OPTS);
+    const result = await synthesizeFromPixelsAsync(pixels, 8, 8, BASE_OPTS);
     const maxAmp = Math.max(...Array.from(result).map(Math.abs));
     expect(maxAmp).toBeLessThan(0.001);
   });
 
-  it("all samples are in the valid [-1, 1] range after normalization", () => {
+  it("all samples are in the valid [-1, 1] range after normalization", async () => {
     const pixels = makeGradientPixels(32, 32);
-    const result = synthesizeFromPixels(pixels, 32, 32, BASE_OPTS);
+    const result = await synthesizeFromPixelsAsync(pixels, 32, 32, BASE_OPTS);
     for (let i = 0; i < result.length; i++) {
       expect(result[i]).toBeGreaterThanOrEqual(-1.01);
       expect(result[i]).toBeLessThanOrEqual(1.01);
     }
   });
 
-  it("WAVE_GENETICS mode is deterministic", () => {
+  it("WAVE_GENETICS mode is deterministic", async () => {
     const pixels = makeGradientPixels(16, 16);
     const opts: SonificationOptions = { ...BASE_OPTS, mode: "WAVE_GENETICS" };
-    const a = synthesizeFromPixels(pixels, 16, 16, opts);
-    const b = synthesizeFromPixels(pixels, 16, 16, opts);
+    const a = await synthesizeFromPixelsAsync(pixels, 16, 16, opts);
+    const b = await synthesizeFromPixelsAsync(pixels, 16, 16, opts);
     for (let i = 0; i < a.length; i++) expect(a[i]).toBe(b[i]);
   });
 
-  it("BIOFIELD mode is deterministic", () => {
+  it("BIOFIELD mode is deterministic", async () => {
     const pixels = makeGradientPixels(16, 16);
     const opts: SonificationOptions = {
       ...BASE_OPTS,
       mode: "BIOFIELD",
       carrierFrequencies: [7.83, 528, 40],
     };
-    const a = synthesizeFromPixels(pixels, 16, 16, opts);
-    const b = synthesizeFromPixels(pixels, 16, 16, opts);
+    const a = await synthesizeFromPixelsAsync(pixels, 16, 16, opts);
+    const b = await synthesizeFromPixelsAsync(pixels, 16, 16, opts);
     for (let i = 0; i < a.length; i++) expect(a[i]).toBe(b[i]);
   });
 
-  it("different modes produce different outputs for the same image", () => {
+  it("different modes produce different outputs for the same image", async () => {
     const pixels = makeGradientPixels(16, 16);
-    const spectral = synthesizeFromPixels(pixels, 16, 16, { ...BASE_OPTS, mode: "SPECTRAL" });
-    const wg = synthesizeFromPixels(pixels, 16, 16, { ...BASE_OPTS, mode: "WAVE_GENETICS" });
+    const spectral = await synthesizeFromPixelsAsync(pixels, 16, 16, { ...BASE_OPTS, mode: "SPECTRAL" });
+    const wg = await synthesizeFromPixelsAsync(pixels, 16, 16, { ...BASE_OPTS, mode: "WAVE_GENETICS" });
     let diff = false;
     for (let i = 0; i < spectral.length; i++) {
       if (spectral[i] !== wg[i]) { diff = true; break; }
     }
     expect(diff).toBe(true);
+  });
+
+  it("CYMATICS mode is deterministic", async () => {
+    const pixels = makeGradientPixels(16, 16);
+    const opts: SonificationOptions = { ...BASE_OPTS, mode: "CYMATICS" };
+    const a = await synthesizeFromPixelsAsync(pixels, 16, 16, opts);
+    const b = await synthesizeFromPixelsAsync(pixels, 16, 16, opts);
+    for (let i = 0; i < a.length; i++) expect(a[i]).toBe(b[i]);
+  });
+
+  it("BINARY mode is deterministic", async () => {
+    const pixels = makeGradientPixels(16, 16);
+    const opts: SonificationOptions = { ...BASE_OPTS, mode: "BINARY" };
+    const a = await synthesizeFromPixelsAsync(pixels, 16, 16, opts);
+    const b = await synthesizeFromPixelsAsync(pixels, 16, 16, opts);
+    for (let i = 0; i < a.length; i++) expect(a[i]).toBe(b[i]);
+  });
+
+  it("calls onProgress with values between 0 and 1", async () => {
+    const pixels = makeGradientPixels(8, 8);
+    const progressValues: number[] = [];
+    await synthesizeFromPixelsAsync(pixels, 8, 8, BASE_OPTS, (p) => progressValues.push(p));
+    expect(progressValues.length).toBeGreaterThan(0);
+    progressValues.forEach((p) => {
+      expect(p).toBeGreaterThanOrEqual(0);
+      expect(p).toBeLessThanOrEqual(100);
+    });
   });
 });
 

@@ -44,7 +44,7 @@ import { IconSymbol } from "@/components/ui/icon-symbol";
 import { useSonification } from "@/lib/sonification-store";
 import { useImagePixels } from "@/lib/use-image-pixels";
 import {
-  synthesizeFromPixels,
+  synthesizeFromPixelsAsync,
   encodeWav,
   arrayBufferToBase64,
   extractWaveformBars,
@@ -55,6 +55,7 @@ import {
   saveCombinedTones,
   saveStackedOutput,
 } from "@/lib/save-audio";
+import type { SaveProgressCallback } from "@/lib/save-audio";
 import {
   applyBrainRegionHRTF,
   BRAIN_REGION_POSITIONS,
@@ -124,6 +125,8 @@ export default function SonifyScreen() {
   const player = useAudioPlayer(null);
   const [showSaveMenu, setShowSaveMenu] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
+  const [synthProgress, setSynthProgress] = useState(0);
+  const [saveProgress, setSaveProgress] = useState(0);
 
   // HRTF + Scalar state
   const [brainRegion, setBrainRegion] = useState<BrainRegion>("whole_brain");
@@ -218,12 +221,18 @@ export default function SonifyScreen() {
     try {
       const { pixels, width, height } = await extractPixels(state.imageUri);
       const enabledHz = getEnabledHz();
-      const samples = synthesizeFromPixels(pixels, width, height, {
-        mode: state.mode,
-        durationSeconds: state.durationSeconds,
-        carrierFrequencies: enabledHz,
-        sampleRate: 44100,
-      });
+      setSynthProgress(0);
+      const samples = await synthesizeFromPixelsAsync(
+        pixels, width, height,
+        {
+          mode: state.mode,
+          durationSeconds: state.durationSeconds,
+          carrierFrequencies: enabledHz,
+          sampleRate: 44100,
+        },
+        (p) => setSynthProgress(Math.round(p * 100)),
+      );
+      setSynthProgress(100);
 
       // Apply HRTF brain-region spatialization
       const hrtfApplied =
@@ -240,6 +249,7 @@ export default function SonifyScreen() {
       dispatch({ type: "SET_AUDIO", wavBuffer, audioUri, waveformBars: bars });
     } catch (e) {
       dispatch({ type: "SET_PROCESSING", processing: false });
+      setSynthProgress(0);
       Alert.alert("Synthesis failed", String(e));
     }
   }, [
@@ -341,29 +351,38 @@ export default function SonifyScreen() {
       return;
     }
     setIsSaving(true);
+    setSaveProgress(0);
     setShowSaveMenu(false);
     try {
       await saveIndividualSonification(
         state.wavBuffer,
-        `BioSonify_${state.mode}_${brainRegion}_${state.durationSeconds}s`
+        `BioSonify_${state.mode}_${brainRegion}_${state.durationSeconds}s`,
+        (p) => setSaveProgress(Math.round(p * 100)),
       );
     } catch (e) {
       Alert.alert("Save failed", String(e));
     } finally {
       setIsSaving(false);
+      setSaveProgress(0);
     }
   }, [state.wavBuffer, state.mode, brainRegion, state.durationSeconds]);
 
   const handleSaveCombined = useCallback(async () => {
     const enabled = getEnabledFrequencies();
     setIsSaving(true);
+    setSaveProgress(0);
     setShowSaveMenu(false);
     try {
-      await saveCombinedTones(enabled, state.durationSeconds);
+      await saveCombinedTones(
+        enabled,
+        state.durationSeconds,
+        (p) => setSaveProgress(Math.round(p * 100)),
+      );
     } catch (e) {
       Alert.alert("Save failed", String(e));
     } finally {
       setIsSaving(false);
+      setSaveProgress(0);
     }
   }, [getEnabledFrequencies, state.durationSeconds]);
 
@@ -374,13 +393,20 @@ export default function SonifyScreen() {
     }
     const enabled = getEnabledFrequencies();
     setIsSaving(true);
+    setSaveProgress(0);
     setShowSaveMenu(false);
     try {
-      await saveStackedOutput(state.wavBuffer, enabled, state.durationSeconds);
+      await saveStackedOutput(
+        state.wavBuffer,
+        enabled,
+        state.durationSeconds,
+        (p) => setSaveProgress(Math.round(p * 100)),
+      );
     } catch (e) {
       Alert.alert("Save failed", String(e));
     } finally {
       setIsSaving(false);
+      setSaveProgress(0);
     }
   }, [state.wavBuffer, getEnabledFrequencies, state.durationSeconds]);
 
@@ -447,8 +473,32 @@ export default function SonifyScreen() {
                 <View style={styles.processingOverlay}>
                   <ActivityIndicator color="#2ECC9A" size="large" />
                   <Text style={styles.processingText}>
-                    Translating image data to sound…
+                    {isExtracting
+                      ? "Reading image pixels…"
+                      : synthProgress > 0 && synthProgress < 100
+                      ? `Synthesizing… ${synthProgress}%`
+                      : "Translating image data to sound…"}
                   </Text>
+                  {synthProgress > 0 && synthProgress < 100 && (
+                    <View style={styles.progressBarTrack}>
+                      <View style={[styles.progressBarFill, { width: `${synthProgress}%` as any }]} />
+                    </View>
+                  )}
+                </View>
+              )}
+              {isSaving && (
+                <View style={styles.processingOverlay}>
+                  <ActivityIndicator color="#F0A500" size="large" />
+                  <Text style={styles.processingText}>
+                    {saveProgress > 0 && saveProgress < 100
+                      ? `Saving… ${saveProgress}%`
+                      : "Preparing file…"}
+                  </Text>
+                  {saveProgress > 0 && saveProgress < 100 && (
+                    <View style={styles.progressBarTrack}>
+                      <View style={[styles.progressBarFill, { width: `${saveProgress}%` as any, backgroundColor: "#F0A500" }]} />
+                    </View>
+                  )}
                 </View>
               )}
             </>
@@ -1262,5 +1312,18 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: "600",
     color: "#7D8590",
+  },
+  progressBarTrack: {
+    width: "80%",
+    height: 4,
+    backgroundColor: "#30363D",
+    borderRadius: 2,
+    marginTop: 8,
+    overflow: "hidden",
+  },
+  progressBarFill: {
+    height: 4,
+    backgroundColor: "#2ECC9A",
+    borderRadius: 2,
   },
 });

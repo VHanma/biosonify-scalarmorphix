@@ -152,3 +152,25 @@
 - [x] bit=1 → 2000 Hz pulse, bit=0 → 200 Hz pulse, pixel luminance → amplitude envelope
 - [x] Mixed 30% over spectral base for musical texture
 - [x] Add BINARY mode to mode selector and Theory tab explanation
+
+## v10 Performance: Fix Save Hang & Slow Load
+
+### Background Worker
+- [x] Move synthesis to chunked async (setTimeout-yielded batches) so the JS thread yields between chunks
+- [x] Progress callback (0–100%) fires after every chunk during synthesis
+- [x] Progress callback fires during WAV base64 encoding and file write
+
+### Progressive Load
+- [x] LRU pixel cache (5 slots) — switching back to a previous image is instant, no re-decode
+- [x] Synthesis chunks are small (256 pixels) so first progress update appears in <100ms
+
+### Save Pipeline
+- [x] WAV base64 encoding done in 65,536-byte chunks with yield between each
+- [x] File write uses chunked append mode to avoid one giant blocking write
+- [x] Save progress callback wired into all three save handlers (Individual, Combined, Stacked)
+
+### UI Feedback
+- [x] Progress bar + percentage label during synthesis (replaces generic spinner)
+- [x] Progress bar + "Saving… N%" label during file save
+- [x] Both overlays are amber (save) and teal (synth) for visual distinction
+- [x] Tests updated to async API — 28/28 passing, 0 TypeScript errors

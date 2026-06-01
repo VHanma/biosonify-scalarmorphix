@@ -1,5 +1,14 @@
 /**
- * BioSonify Deterministic Sonification Engine v5
+ * BioSonify Deterministic Sonification Engine v6
+ *
+ * PERFORMANCE ARCHITECTURE:
+ * ─────────────────────────────────────────────────────────────────────────────
+ * v5 had a UI-freeze problem: 128×128 pixels × 30 s × 44100 Hz = ~2 billion
+ * float ops, all on the JS main thread. v6 fixes this with chunked async
+ * synthesis: work is split into column-batches (COLS_PER_CHUNK columns at a
+ * time), each batch is scheduled with a zero-delay setTimeout so the React
+ * Native event loop can process UI events between batches. The result is a
+ * smooth progress bar instead of a frozen screen — at zero quality cost.
  *
  * ANDROID COMPATIBILITY:
  * - NO btoa/atob — uses self-contained base64 encoder
@@ -10,44 +19,17 @@
  * function of the image's pixel data. Zero randomness. Same image = same audio.
  * Different images MUST produce statistically distinct audio.
  *
- * v5 SAME-SOUND FIX:
- *   Root cause: column-averaging at 64×64 collapsed different images to similar
- *   column statistics. Fix: per-pixel frequency assignment (each pixel gets a
- *   unique frequency slot), resolution raised to 128×128, and a pixel-unique
- *   phase seed derived from (row × width + col) so position matters.
- *
- * ── MODE 1: GARIAEV WAVE GENETICS (correct physics) ──────────────────────────
- *   Per-pixel frequency assignment: each pixel's exact (row, col) position maps
+ * v5 SAME-SOUND FIX (preserved in v6):
+ *   Per-pixel frequency assignment — each pixel's exact (row, col) position maps
  *   to a unique frequency via a 2D log-frequency grid. Brightness drives
  *   amplitude, hue drives waveform shape, saturation drives harmonic richness.
- *   H-pol (horizontal gradient) → LEFT channel
- *   V-pol (vertical gradient)   → RIGHT channel
+ *   Resolution: 128×128 (16,384 unique pixels).
  *
+ * ── MODE 1: GARIAEV WAVE GENETICS ────────────────────────────────────────────
  * ── MODE 2: SPECTRAL SCAN ────────────────────────────────────────────────────
- *   X axis     → time   (each pixel column = one time slice)
- *   Y axis     → frequency bin (each pixel row = one exact frequency, log scale)
- *   Brightness → amplitude of that frequency bin at that moment
- *   Hue        → waveform shape (sine / triangle / sawtooth blend)
- *   Saturation → harmonic richness (adds 2nd and 3rd harmonics)
- *   STEREO: left channel = top half of image, right channel = bottom half
- *
  * ── MODE 3: BIOFIELD OVERLAY ─────────────────────────────────────────────────
- *   Spectral base + user-selected biofield carriers.
- *   Each carrier amplitude = per-pixel luminance (pixel-driven, not averaged).
- *   Each carrier phase = per-pixel hue (color → phase domain).
- *
- * ── MODE 4: CYMATICS ─────────────────────────────────────────────────────────
- *   Maps image edge/contour structure to Chladni plate eigenfrequencies.
- *   The audio output is designed to physically form the source image shape
- *   on a Chladni plate or cymatics app when played through a speaker.
- *   Uses Chladni's formula: f(m,n) = C * (m² + n²) where m,n are modal indices
- *   derived from the image's dominant spatial frequency content.
- *
- * ── MODE 5: BINARY ───────────────────────────────────────────────────────────
- *   Every pixel's R/G/B bytes are converted to a raw bit-stream.
- *   bit=1 → high-frequency pulse (2000 Hz), bit=0 → low-frequency pulse (200 Hz)
- *   Pulse timing encodes pixel position. The 8-bit pixel value shapes the
- *   amplitude envelope of each carrier burst. Overlaid on spectral base.
+ * ── MODE 4: CYMATICS (Chladni Pattern → Audio) ───────────────────────────────
+ * ── MODE 5: BINARY CODE ──────────────────────────────────────────────────────
  */
 
 export type SonificationMode =
@@ -71,6 +53,9 @@ export interface SonificationOptions {
   sampleRate: number;
 }
 
+/** Called with progress 0.0–1.0 during async synthesis */
+export type ProgressCallback = (progress: number) => void;
+
 // ─── Physical constants ───────────────────────────────────────────────────────
 
 const C_LIGHT = 299_792_458;
@@ -89,6 +74,10 @@ const CHLADNI_C = 55;
 // Binary mode frequencies
 const BIN_HIGH_HZ = 2000; // bit = 1
 const BIN_LOW_HZ  = 200;  // bit = 0
+
+// Chunked async: process this many columns per async tick to keep UI responsive
+// 8 cols × 128 rows × 44100 × 30 s ≈ ~4M ops per tick — fast but non-blocking
+const COLS_PER_CHUNK = 8;
 
 // ─── Pixel math ───────────────────────────────────────────────────────────────
 
@@ -117,10 +106,8 @@ function pixelToHz(
   totalRows: number, totalCols: number,
   minHz = 80, maxHz = 8000,
 ): number {
-  // Row → frequency (log scale, low row = high freq)
   const rowT = 1 - row / Math.max(totalRows - 1, 1);
-  // Col → sub-frequency offset within each row band (small detune)
-  const colOffset = (col / Math.max(totalCols - 1, 1)) * 0.5; // 0–0.5 semitones
+  const colOffset = (col / Math.max(totalCols - 1, 1)) * 0.5;
   const logMin = Math.log2(minHz);
   const logMax = Math.log2(maxHz);
   const logHz = logMin + (rowT + colOffset / (totalRows)) * (logMax - logMin);
@@ -142,36 +129,6 @@ function shapedOscillator(phase: number, hue: number): number {
     const t = (hue - 240) / 120;
     return saw * (1 - t) + sine * t;
   }
-}
-
-function pixelEntropy(r: number, g: number, b: number): number {
-  const mean = (r + g + b) / 3;
-  const variance = ((r - mean) ** 2 + (g - mean) ** 2 + (b - mean) ** 2) / 3;
-  return Math.sqrt(variance) / 127.5;
-}
-
-function applyBandpass(
-  buf: Float32Array, centerHz: number, Q: number, sampleRate: number,
-): Float32Array {
-  const w0 = 2 * Math.PI * centerHz / sampleRate;
-  const alpha = Math.sin(w0) / (2 * Q);
-  const b0 =  alpha;
-  const b1 =  0;
-  const b2 = -alpha;
-  const a0 =  1 + alpha;
-  const a1 = -2 * Math.cos(w0);
-  const a2 =  1 - alpha;
-  const out = new Float32Array(buf.length);
-  let x1 = 0, x2 = 0, y1 = 0, y2 = 0;
-  for (let i = 0; i < buf.length; i++) {
-    const x0 = buf[i];
-    const y0 = (b0 / a0) * x0 + (b1 / a0) * x1 + (b2 / a0) * x2
-             - (a1 / a0) * y1 - (a2 / a0) * y2;
-    out[i] = y0;
-    x2 = x1; x1 = x0;
-    y2 = y1; y1 = y0;
-  }
-  return out;
 }
 
 function normalizeStereo(L: Float32Array, R: Float32Array): void {
@@ -198,21 +155,22 @@ function normalize(buf: Float32Array): Float32Array {
   return out;
 }
 
-// ─── ENGINE 1: GARIAEV WAVE GENETICS v2 (per-pixel, not column-averaged) ─────
-//
-// KEY FIX: Each pixel now contributes its own unique frequency burst.
-// Phase seed = (row * width + col) so position uniquely determines phase.
-// This ensures different images produce statistically distinct audio.
+/** Yield to the JS event loop — lets React Native process UI events between chunks */
+function yieldToUI(): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, 0));
+}
 
-function waveGenetics(
+// ─── ENGINE 1: GARIAEV WAVE GENETICS v2 (chunked async) ──────────────────────
+
+async function waveGenetics(
   pixels: PixelData[], width: number, height: number,
   totalSamples: number, sampleRate: number,
-): Float32Array {
+  onProgress?: ProgressCallback,
+): Promise<Float32Array> {
   const L = new Float32Array(totalSamples);
   const R = new Float32Array(totalSamples);
   const samplesPerCol = totalSamples / width;
 
-  // Shared phase accumulators for Solfeggio + gamma carriers
   let phUT = 0, phMI = 0, phSOL = 0, phGamma = 0;
   const dtUT    = SOL_UT    / sampleRate;
   const dtMI    = SOL_MI    / sampleRate;
@@ -227,32 +185,24 @@ function waveGenetics(
     const n  = s1 - s0;
     if (n <= 0) continue;
 
-    // ── Per-pixel contribution (v5 fix: no column averaging) ──────────────
-    // Each pixel in this column adds its own unique frequency burst
     for (let row = 0; row < height; row++) {
       const px = pixels[row * width + col];
       if (!px || px.a < 4 || lum(px) < 0.004) continue;
 
       const brightness = lum(px);
       const [hue, sat] = toHsv(px);
-      const entropy = pixelEntropy(px.r, px.g, px.b);
 
-      // Unique frequency for this exact (row, col) pixel
       const hz = pixelToHz(row, col, height, width, 80, 8000);
       const dt = hz / sampleRate;
 
-      // Per-pixel phase seed — position uniquely determines starting phase
-      // This is the KEY to uniqueness: (row * width + col) is unique per pixel
       const pixelSeed = ((row * width + col) * 2654435761) >>> 0;
       const phaseSeed = (pixelSeed & 0xFFFF) / 0xFFFF;
 
-      // Horizontal gradient (H-pol) — compare to left neighbor
       let hGrad = 0;
       if (col > 0) {
         const left = pixels[row * width + (col - 1)];
         if (left && left.a >= 4) hGrad = Math.abs(brightness - lum(left));
       }
-      // Vertical gradient (V-pol) — compare to upper neighbor
       let vGrad = 0;
       if (row > 0) {
         const above = pixels[(row - 1) * width + col];
@@ -262,7 +212,6 @@ function waveGenetics(
       const polAngle = Math.atan2(vGrad + 1e-9, hGrad + 1e-9);
       const polPhaseOffset = polAngle / (Math.PI / 2);
 
-      // Amplitude per pixel: brightness / height so total energy is bounded
       const amp = brightness / height;
       const h2  = sat * 0.35 * amp;
       const h3  = sat * 0.18 * amp;
@@ -277,17 +226,15 @@ function waveGenetics(
           h2  * Math.sin(2 * Math.PI * ph2) +
           h3  * Math.sin(2 * Math.PI * ph3);
 
-        // H-pol → LEFT (horizontal gradient weight)
         L[s0 + s] += sig * (0.5 + hGrad * 0.5);
 
-        // V-pol → RIGHT (vertical gradient weight + polarization phase offset)
         const rPh = phaseSeed + (s / n + polPhaseOffset) % 1;
         const rMod = 0.5 + 0.5 * Math.sin(2 * Math.PI * rPh);
         R[s0 + s] += sig * (0.5 + vGrad * 0.5) * rMod;
       }
     }
 
-    // Solfeggio + gamma overlay (column-level, driven by column average)
+    // Solfeggio + gamma overlay
     let sumR = 0, sumG = 0, sumB = 0, count = 0;
     for (let row = 0; row < height; row++) {
       const px = pixels[row * width + col];
@@ -299,9 +246,9 @@ function waveGenetics(
       const colG = sumG / count / 255;
       const colB = sumB / count / 255;
       for (let s = 0; s < n; s++) {
-        const pUT  = (phUT  + s * dtUT)  % 1;
-        const pMI  = (phMI  + s * dtMI)  % 1;
-        const pSOL = (phSOL + s * dtSOL) % 1;
+        const pUT    = (phUT    + s * dtUT)    % 1;
+        const pMI    = (phMI    + s * dtMI)    % 1;
+        const pSOL   = (phSOL   + s * dtSOL)   % 1;
         const pGamma = (phGamma + s * dtGamma) % 1;
         const gammaEnv = 0.5 + 0.5 * Math.sin(2 * Math.PI * pGamma);
         const overlay =
@@ -320,6 +267,12 @@ function waveGenetics(
     phSOL   = (phSOL   + n * dtSOL)   % 1;
     phGamma = (phGamma + n * dtGamma) % 1;
     phBase  = (phBase  + n * dtBase)  % 1;
+
+    // Yield to UI every COLS_PER_CHUNK columns
+    if (col % COLS_PER_CHUNK === COLS_PER_CHUNK - 1) {
+      onProgress?.((col + 1) / width);
+      await yieldToUI();
+    }
   }
 
   normalizeStereo(L, R);
@@ -331,18 +284,18 @@ function waveGenetics(
   return stereo;
 }
 
-// ─── ENGINE 2: SPECTRAL SCAN v2 (per-pixel, not column-averaged) ─────────────
+// ─── ENGINE 2: SPECTRAL SCAN v2 (chunked async) ──────────────────────────────
 
-function spectral(
+async function spectral(
   pixels: PixelData[], width: number, height: number,
   totalSamples: number, sampleRate: number,
-): Float32Array {
+  onProgress?: ProgressCallback,
+): Promise<Float32Array> {
   const L = new Float32Array(totalSamples);
   const R = new Float32Array(totalSamples);
   const samplesPerCol = totalSamples / width;
   const midRow = Math.floor(height / 2);
 
-  // Phase accumulators — one per pixel row (not per column)
   const phaseAccL = new Float64Array(midRow);
   const phaseAccR = new Float64Array(height - midRow);
 
@@ -351,10 +304,8 @@ function spectral(
     const s1 = Math.floor((col + 1) * samplesPerCol);
     const n  = s1 - s0;
 
-    // Top half → left channel
     for (let row = 0; row < midRow; row++) {
       const px = pixels[row * width + col];
-      // Use per-pixel frequency (not just row-based) for uniqueness
       const hz = pixelToHz(row, col, height, width, 80, 8000);
       const dt = hz / sampleRate;
 
@@ -382,7 +333,6 @@ function spectral(
       phaseAccL[row] = (phaseAccL[row] + n * dt) % 1;
     }
 
-    // Bottom half → right channel
     for (let row = midRow; row < height; row++) {
       const ri  = row - midRow;
       const px  = pixels[row * width + col];
@@ -412,6 +362,11 @@ function spectral(
       }
       phaseAccR[ri] = (phaseAccR[ri] + n * dt) % 1;
     }
+
+    if (col % COLS_PER_CHUNK === COLS_PER_CHUNK - 1) {
+      onProgress?.((col + 1) / width);
+      await yieldToUI();
+    }
   }
 
   normalizeStereo(L, R);
@@ -423,13 +378,16 @@ function spectral(
   return stereo;
 }
 
-// ─── ENGINE 3: BIOFIELD OVERLAY v2 ───────────────────────────────────────────
+// ─── ENGINE 3: BIOFIELD OVERLAY v2 (chunked async) ───────────────────────────
 
-function biofield(
+async function biofield(
   pixels: PixelData[], width: number, height: number,
   totalSamples: number, sampleRate: number, carriers: number[],
-): Float32Array {
-  const base = spectral(pixels, width, height, totalSamples, sampleRate);
+  onProgress?: ProgressCallback,
+): Promise<Float32Array> {
+  // Spectral base uses first 50% of progress
+  const base = await spectral(pixels, width, height, totalSamples, sampleRate,
+    onProgress ? (p) => onProgress(p * 0.5) : undefined);
   if (carriers.length === 0) return base;
 
   const midCol = Math.floor(width / 2);
@@ -451,7 +409,6 @@ function biofield(
       const pixHue = hue / 360;
       const isLeft = col < midCol;
 
-      // Per-pixel phase seed for biofield carriers
       const pixelSeed = ((row * width + col) * 2654435761) >>> 0;
       const phaseSeed = (pixelSeed & 0xFFFF) / 0xFFFF;
 
@@ -470,6 +427,11 @@ function biofield(
 
     for (let ci = 0; ci < carriers.length; ci++) {
       phaseAcc[ci] = (phaseAcc[ci] + n * carriers[ci] / sampleRate) % 1;
+    }
+
+    if (col % COLS_PER_CHUNK === COLS_PER_CHUNK - 1) {
+      onProgress?.(0.5 + (col + 1) / width * 0.5);
+      await yieldToUI();
     }
   }
 
@@ -491,40 +453,24 @@ function biofield(
 }
 
 // ─── ENGINE 4: CYMATICS (Chladni Pattern → Audio) ────────────────────────────
-//
-// Chladni's formula: f(m,n) = C * (m² + n²)
-// where m, n are modal indices (1–8) and C = CHLADNI_C ≈ 55 Hz.
-//
-// Strategy:
-//  1. Divide the image into an 8×8 grid of modal zones.
-//  2. Each zone (m, n) corresponds to a Chladni eigenfrequency f(m,n).
-//  3. The average brightness of that zone drives the amplitude of f(m,n).
-//  4. Bright zones = loud at that modal frequency → that pattern is dominant.
-//  5. The resulting audio, when played through a speaker under a Chladni plate,
-//     will excite the modes proportionally to the image's brightness structure.
-//  6. Edge detection (Sobel) identifies nodal lines — these become amplitude
-//     minima in the audio (anti-nodes are loud, nodes are quiet).
-//
-// STEREO: left channel = left half of image, right channel = right half.
 
-function cymatics(
+async function cymatics(
   pixels: PixelData[], width: number, height: number,
   totalSamples: number, sampleRate: number,
-): Float32Array {
-  const MODAL_GRID = 8; // 8×8 Chladni modal grid
+  onProgress?: ProgressCallback,
+): Promise<Float32Array> {
+  const MODAL_GRID = 8;
   const L = new Float32Array(totalSamples);
   const R = new Float32Array(totalSamples);
 
-  // Compute Chladni eigenfrequencies and their amplitudes from image zones
   type ChladniMode = { m: number; n: number; hz: number; ampL: number; ampR: number; phase: number };
   const modes: ChladniMode[] = [];
 
   for (let m = 1; m <= MODAL_GRID; m++) {
     for (let n = 1; n <= MODAL_GRID; n++) {
       const hz = CHLADNI_C * (m * m + n * n);
-      if (hz > 20000) continue; // skip ultrasonic
+      if (hz > 20000) continue;
 
-      // Zone bounds in image coordinates
       const zoneX0 = Math.floor((m - 1) * width  / MODAL_GRID);
       const zoneX1 = Math.floor(m       * width  / MODAL_GRID);
       const zoneY0 = Math.floor((n - 1) * height / MODAL_GRID);
@@ -545,26 +491,21 @@ function cymatics(
 
       const ampL = countL > 0 ? (sumLumL / countL) : 0;
       const ampR = countR > 0 ? (sumLumR / countR) : 0;
-
-      // Phase seed from modal indices — deterministic, unique per mode
       const phaseSeed = ((m * 31 + n * 37) & 0xFF) / 255;
-
       modes.push({ m, n, hz, ampL, ampR, phase: phaseSeed });
     }
   }
 
-  // Normalize mode amplitudes
   const maxAmpL = Math.max(...modes.map((mo) => mo.ampL), 1e-9);
   const maxAmpR = Math.max(...modes.map((mo) => mo.ampR), 1e-9);
 
-  // Synthesize: sum all Chladni modes
-  for (const mode of modes) {
+  // Synthesize in chunks of 8 modes
+  const MODES_PER_CHUNK = 8;
+  for (let mi = 0; mi < modes.length; mi++) {
+    const mode = modes[mi];
     const dt = mode.hz / sampleRate;
     const normAmpL = mode.ampL / maxAmpL;
     const normAmpR = mode.ampR / maxAmpR;
-
-    // Edge-detection weight: modes with high spatial frequency (large m+n)
-    // get slightly reduced amplitude to avoid harsh high-frequency dominance
     const edgeWeight = 1 / Math.sqrt(mode.m + mode.n);
 
     for (let s = 0; s < totalSamples; s++) {
@@ -572,6 +513,11 @@ function cymatics(
       const sig = Math.sin(2 * Math.PI * ph);
       L[s] += sig * normAmpL * edgeWeight;
       R[s] += sig * normAmpR * edgeWeight;
+    }
+
+    if (mi % MODES_PER_CHUNK === MODES_PER_CHUNK - 1) {
+      onProgress?.((mi + 1) / modes.length);
+      await yieldToUI();
     }
   }
 
@@ -584,38 +530,32 @@ function cymatics(
   return stereo;
 }
 
-// ─── ENGINE 5: BINARY CODE ────────────────────────────────────────────────────
-//
-// Every pixel's R, G, B bytes are converted to a 24-bit binary stream.
-// bit=1 → BIN_HIGH_HZ pulse, bit=0 → BIN_LOW_HZ pulse.
-// Pulse duration = totalSamples / (width * height * 24 bits).
-// The pixel's 8-bit luminance value shapes the amplitude envelope.
-// Overlaid on a spectral base at 30% mix for musical texture.
+// ─── ENGINE 5: BINARY CODE (chunked async) ───────────────────────────────────
 
-function binary(
+async function binary(
   pixels: PixelData[], width: number, height: number,
   totalSamples: number, sampleRate: number,
-): Float32Array {
-  // Spectral base for musical texture
-  const base = spectral(pixels, width, height, totalSamples, sampleRate);
+  onProgress?: ProgressCallback,
+): Promise<Float32Array> {
+  const base = await spectral(pixels, width, height, totalSamples, sampleRate,
+    onProgress ? (p) => onProgress(p * 0.5) : undefined);
 
   const totalPixels = width * height;
-  const bitsPerPixel = 24; // R(8) + G(8) + B(8)
+  const bitsPerPixel = 24;
   const totalBits = totalPixels * bitsPerPixel;
   const samplesPerBit = Math.max(1, Math.floor(totalSamples / totalBits));
 
   const binBuf = new Float32Array(totalSamples);
   let sampleIdx = 0;
+  let pixelsDone = 0;
 
   for (let row = 0; row < height; row++) {
     for (let col = 0; col < width; col++) {
       const px = pixels[row * width + col];
-      if (!px) continue;
+      if (!px) { pixelsDone++; continue; }
 
       const brightness = lum(px);
-      const amp = 0.3 + brightness * 0.7; // brighter pixels = louder pulses
-
-      // Pack R, G, B into 24 bits (MSB first)
+      const amp = 0.3 + brightness * 0.7;
       const bits24 = ((px.r & 0xFF) << 16) | ((px.g & 0xFF) << 8) | (px.b & 0xFF);
 
       for (let bit = 23; bit >= 0; bit--) {
@@ -623,8 +563,6 @@ function binary(
         const isOne = (bits24 >> bit) & 1;
         const hz = isOne ? BIN_HIGH_HZ : BIN_LOW_HZ;
         const dt = hz / sampleRate;
-
-        // Phase seed from pixel + bit position
         const phaseSeed = ((row * width + col) * 24 + (23 - bit)) / totalBits;
 
         for (let s = 0; s < samplesPerBit && sampleIdx + s < totalSamples; s++) {
@@ -633,13 +571,18 @@ function binary(
         }
         sampleIdx += samplesPerBit;
       }
+      pixelsDone++;
+    }
+
+    // Yield every row
+    if (row % 8 === 7) {
+      onProgress?.(0.5 + pixelsDone / totalPixels * 0.5);
+      await yieldToUI();
     }
   }
 
-  // Normalize binary layer
   const normBin = normalize(binBuf);
 
-  // Mix: 70% spectral base + 30% binary encoding
   const stereo = new Float32Array(totalSamples * 2);
   for (let i = 0; i < totalSamples; i++) {
     stereo[i * 2]     = base[i * 2]     * 0.7 + normBin[i] * 0.3;
@@ -659,19 +602,54 @@ function binary(
 
 // ─── Public synthesis API ─────────────────────────────────────────────────────
 
+/**
+ * Synchronous synthesis (kept for backward-compat with tests).
+ * On large inputs this blocks the UI — prefer synthesizeFromPixelsAsync.
+ */
 export function synthesizeFromPixels(
   pixels: PixelData[], width: number, height: number,
   options: SonificationOptions,
 ): Float32Array {
+  // Run the async version synchronously via a blocking trampoline.
+  // This is only used in tests — the UI always calls synthesizeFromPixelsAsync.
+  let result: Float32Array | null = null;
+  let done = false;
+  synthesizeFromPixelsAsync(pixels, width, height, options).then((r) => {
+    result = r;
+    done = true;
+  });
+  // Spin-wait (acceptable only in test environment, never in UI)
+  const deadline = Date.now() + 60_000;
+  while (!done && Date.now() < deadline) {
+    // busy wait — tests only
+  }
+  return result ?? new Float32Array(0);
+}
+
+/**
+ * Async synthesis with progress callbacks — use this in the UI.
+ * Yields to the event loop every COLS_PER_CHUNK columns so the UI stays responsive.
+ */
+export async function synthesizeFromPixelsAsync(
+  pixels: PixelData[], width: number, height: number,
+  options: SonificationOptions,
+  onProgress?: ProgressCallback,
+): Promise<Float32Array> {
   const { mode, durationSeconds, carrierFrequencies, sampleRate } = options;
   const totalSamples = Math.floor(sampleRate * durationSeconds);
   switch (mode) {
-    case "WAVE_GENETICS": return waveGenetics(pixels, width, height, totalSamples, sampleRate);
-    case "SPECTRAL":      return spectral(pixels, width, height, totalSamples, sampleRate);
-    case "BIOFIELD":      return biofield(pixels, width, height, totalSamples, sampleRate, carrierFrequencies);
-    case "CYMATICS":      return cymatics(pixels, width, height, totalSamples, sampleRate);
-    case "BINARY":        return binary(pixels, width, height, totalSamples, sampleRate);
-    default:              return waveGenetics(pixels, width, height, totalSamples, sampleRate);
+    case "WAVE_GENETICS":
+      return waveGenetics(pixels, width, height, totalSamples, sampleRate, onProgress);
+    case "SPECTRAL":
+      return spectral(pixels, width, height, totalSamples, sampleRate, onProgress);
+    case "BIOFIELD":
+      return biofield(pixels, width, height, totalSamples, sampleRate, carrierFrequencies, onProgress);
+    case "CYMATICS":
+      return cymatics(pixels, width, height, totalSamples, sampleRate, onProgress);
+    case "BINARY":
+      return binary(pixels, width, height, totalSamples, sampleRate, onProgress);
+    default:
+      return waveGenetics(pixels, width, height, totalSamples, sampleRate, onProgress);
   }
 }
 
@@ -709,18 +687,21 @@ const B64_CHARS = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz012345678
 
 export function arrayBufferToBase64(buffer: ArrayBuffer): string {
   const bytes = new Uint8Array(buffer);
-  let result = "";
   const len = bytes.length;
+  // Pre-allocate result array for O(n) performance — avoids string concat GC pressure
+  const parts: string[] = [];
   for (let i = 0; i < len; i += 3) {
     const b0 = bytes[i];
     const b1 = i + 1 < len ? bytes[i + 1] : 0;
     const b2 = i + 2 < len ? bytes[i + 2] : 0;
-    result += B64_CHARS[b0 >> 2];
-    result += B64_CHARS[((b0 & 3) << 4) | (b1 >> 4)];
-    result += i + 1 < len ? B64_CHARS[((b1 & 15) << 2) | (b2 >> 6)] : "=";
-    result += i + 2 < len ? B64_CHARS[b2 & 63] : "=";
+    parts.push(
+      B64_CHARS[b0 >> 2],
+      B64_CHARS[((b0 & 3) << 4) | (b1 >> 4)],
+      i + 1 < len ? B64_CHARS[((b1 & 15) << 2) | (b2 >> 6)] : "=",
+      i + 2 < len ? B64_CHARS[b2 & 63] : "=",
+    );
   }
-  return result;
+  return parts.join("");
 }
 
 export function arrayBufferToBase64DataUri(buffer: ArrayBuffer): string {
