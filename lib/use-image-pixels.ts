@@ -15,8 +15,8 @@ import * as ImageManipulator from "expo-image-manipulator";
 import { Platform } from "react-native";
 import type { PixelData } from "./sonification-engine";
 
-const TARGET_W = 64;
-const TARGET_H = 64;
+const TARGET_W = 128;
+const TARGET_H = 128;
 
 export interface UseImagePixelsResult {
   extractPixels: (uri: string) => Promise<{

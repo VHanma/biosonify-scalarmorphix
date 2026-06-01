@@ -45,6 +45,14 @@ export type BrainRegion =
   | "hippocampus_bilateral"
   | "brainstem"
   | "corpus_callosum"
+  | "basal_ganglia"
+  | "thalamus"
+  | "insula"
+  | "anterior_cingulate"
+  | "nucleus_accumbens"
+  | "locus_coeruleus"
+  | "raphe_nuclei"
+  | "ventral_tegmental"
   | "whole_brain";
 
 export interface HRTFPosition {
@@ -280,6 +288,99 @@ export const BRAIN_REGION_POSITIONS: Record<BrainRegion, HRTFPosition> = {
     pinnaNotchHz: 11000,
     pinnaNotchQ: 2.5,
     label: "Corpus Callosum",
+  },
+
+  /** Basal ganglia (caudate, putamen, globus pallidus): deep bilateral, lateral to thalamus.
+   *  Dopamine/reward/motor. Rendered slightly lateral and deep-center. */
+  basal_ganglia: {
+    azimuth: 30,
+    elevation: -5,
+    itdSamples: woodworthITD(30),
+    ildDb: headShadowILD(30, 2000),
+    pinnaNotchHz: 6000,
+    pinnaNotchQ: 2.0,
+    label: "Basal Ganglia",
+  },
+
+  /** Thalamus: geometric center of brain, sensory relay / consciousness gating. */
+  thalamus: {
+    azimuth: 0,
+    elevation: 10,
+    itdSamples: 0,
+    ildDb: 0,
+    pinnaNotchHz: 9000,
+    pinnaNotchQ: 2.5,
+    label: "Thalamus",
+  },
+
+  /** Insula: buried within lateral sulcus, interoception / empathy / pain.
+   *  Bilateral — rendered slightly lateral and mid-elevation. */
+  insula: {
+    azimuth: 60,
+    elevation: 5,
+    itdSamples: woodworthITD(60),
+    ildDb: headShadowILD(60, 3000),
+    pinnaNotchHz: 7500,
+    pinnaNotchQ: 2.0,
+    label: "Insula",
+  },
+
+  /** Anterior cingulate cortex (ACC): medial frontal, attention / error detection. */
+  anterior_cingulate: {
+    azimuth: 0,
+    elevation: 35,
+    itdSamples: 0,
+    ildDb: 0,
+    pinnaNotchHz: 11500,
+    pinnaNotchQ: 2.5,
+    label: "Anterior Cingulate Cortex",
+  },
+
+  /** Nucleus accumbens: ventral striatum, reward / motivation / addiction release.
+   *  Deep anterior, slightly inferior. */
+  nucleus_accumbens: {
+    azimuth: 0,
+    elevation: -15,
+    itdSamples: 0,
+    ildDb: 0,
+    pinnaNotchHz: 5500,
+    pinnaNotchQ: 2.0,
+    label: "Nucleus Accumbens",
+  },
+
+  /** Locus coeruleus: brainstem, norepinephrine / alertness / stress response.
+   *  Posterior inferior, slightly lateral. */
+  locus_coeruleus: {
+    azimuth: 150,
+    elevation: -50,
+    itdSamples: woodworthITD(150),
+    ildDb: headShadowILD(150, 3000),
+    pinnaNotchHz: 4200,
+    pinnaNotchQ: 1.8,
+    label: "Locus Coeruleus",
+  },
+
+  /** Raphe nuclei: brainstem midline, serotonin production. */
+  raphe_nuclei: {
+    azimuth: 180,
+    elevation: -45,
+    itdSamples: 0,
+    ildDb: 0,
+    pinnaNotchHz: 4000,
+    pinnaNotchQ: 1.5,
+    label: "Raphe Nuclei",
+  },
+
+  /** Ventral tegmental area (VTA): midbrain, dopamine reward pathway.
+   *  Deep posterior inferior, midline. */
+  ventral_tegmental: {
+    azimuth: 180,
+    elevation: -40,
+    itdSamples: 0,
+    ildDb: 0,
+    pinnaNotchHz: 4800,
+    pinnaNotchQ: 1.8,
+    label: "Ventral Tegmental Area",
   },
 
   /** Whole brain: no spatialization, equal bilateral. */

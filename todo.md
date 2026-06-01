@@ -112,3 +112,43 @@
 - [x] Implement phase-conjugate pair encoding: every carrier gets a 180° phase-shifted twin
 - [x] Apply scalar encoding to all three synthesis engines
 - [x] Add scalar mode toggle in settings/player
+
+## v9 Features: Same-Sound Fix, Brain Regions, Affirmation Encoding, Cymatics Mode
+
+### Critical Bug Fix: Same-Sound Issue
+- [x] Audit sonification engine — found root cause: column-averaging at 64×64 collapsed different images to similar statistics
+- [x] Fix synthesis to be truly pixel-unique: per-pixel frequency assignment with position-derived phase seed
+- [x] Raised resolution from 64×64 to 128×128 (4× more pixels)
+- [x] Re-run determinism tests after fix — 25/25 passing
+
+### Brain Region Expansion
+- [x] Add basal ganglia (caudate, putamen, globus pallidus) — dopamine/reward/motor
+- [x] Add thalamus — sensory relay, consciousness gating
+- [x] Add insula — interoception, empathy, pain
+- [x] Add anterior cingulate cortex (ACC) — attention, error detection
+- [x] Add nucleus accumbens — reward, motivation, addiction release
+- [x] Add locus coeruleus — norepinephrine, alertness, stress response
+- [x] Add raphe nuclei — serotonin production
+- [x] Add ventral tegmental area (VTA) — dopamine reward pathway
+
+### Affirmation Subliminal / Ultrasonic / Scalar Encoding
+- [x] Add encoding options selector to affirmation section: Normal / Subliminal / Ultrasonic / Scalar / All
+- [x] Subliminal: pitch-shift affirmation 2–3 octaves up (still audible range, below conscious detection threshold)
+- [x] Ultrasonic: frequency-shift affirmation to 17–22 kHz carrier (ultrasonic embedding)
+- [x] Scalar: apply phase-conjugate encoding to affirmation audio
+- [x] All: apply all three simultaneously
+- [x] Show encoding badge on affirmation section when active
+
+### Cymatics Mode (Chladni Pattern → Audio)
+- [x] Research Chladni plate resonance math: f(m,n) = C×(m²+n²)
+- [x] Build cymatics engine: 8×8 modal grid → 64 Chladni eigenfrequencies weighted by image zone brightness
+- [x] Implement CYMATICS synthesis mode in sonification engine
+- [x] Audio designed to physically form source image shape on Chladni plate / cymatics app
+- [x] Add CYMATICS to mode selector in player screen
+- [x] Add explanation card in Theory tab
+
+### Binary Code Encoding
+- [x] Build binary engine: every pixel's R/G/B bytes → 24-bit pulse-stream
+- [x] bit=1 → 2000 Hz pulse, bit=0 → 200 Hz pulse, pixel luminance → amplitude envelope
+- [x] Mixed 30% over spectral base for musical texture
+- [x] Add BINARY mode to mode selector and Theory tab explanation

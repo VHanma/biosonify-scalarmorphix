@@ -71,12 +71,16 @@ const MODE_LABELS: Record<SonificationMode, string> = {
   SPECTRAL: "Spectral",
   WAVE_GENETICS: "Wave Genetics",
   BIOFIELD: "Biofield",
+  CYMATICS: "Cymatics",
+  BINARY: "Binary",
 };
 
 const MODE_COLORS: Record<SonificationMode, string> = {
   SPECTRAL: "#2ECC9A",
   WAVE_GENETICS: "#F0A500",
   BIOFIELD: "#4A9EFF",
+  CYMATICS: "#E040FB",
+  BINARY: "#00E5FF",
 };
 
 const MODE_DESCRIPTIONS: Record<SonificationMode, string> = {
@@ -86,6 +90,10 @@ const MODE_DESCRIPTIONS: Record<SonificationMode, string> = {
     "Every pixel: R→396 Hz · G→528 Hz · B→741 Hz · luminance→40 Hz coherence · X→phase · Y→detune",
   BIOFIELD:
     "Full spectral scan + pixel-driven biofield carriers (amplitude & phase from image data)",
+  CYMATICS:
+    "Chladni plate mode — audio designed to physically form the image shape on a cymatics plate",
+  BINARY:
+    "Every pixel's R/G/B bytes converted to binary bit-stream · 1→2000 Hz · 0→200 Hz · brightness→amplitude",
 };
 
 const BRAIN_REGION_LIST: { key: BrainRegion; label: string }[] = Object.entries(
@@ -128,6 +136,31 @@ export default function SonifyScreen() {
   const [affirmUri, setAffirmUri] = useState<string | null>(null);
   const affirmPlayerRef = useRef<ReturnType<typeof createAudioPlayer> | null>(null);
   const [affirmPlaying, setAffirmPlaying] = useState(false);
+
+  // Affirmation encoding mode
+  type AffirmEncoding = "normal" | "subliminal" | "ultrasonic" | "scalar" | "all";
+  const [affirmEncoding, setAffirmEncoding] = useState<AffirmEncoding>("normal");
+  const AFFIRM_ENCODING_LABELS: Record<AffirmEncoding, string> = {
+    normal: "Normal",
+    subliminal: "Subliminal",
+    ultrasonic: "Ultrasonic",
+    scalar: "Scalar",
+    all: "All",
+  };
+  const AFFIRM_ENCODING_COLORS: Record<AffirmEncoding, string> = {
+    normal: "#7D8590",
+    subliminal: "#E040FB",
+    ultrasonic: "#00E5FF",
+    scalar: "#F0A500",
+    all: "#2ECC9A",
+  };
+  const AFFIRM_ENCODING_HINTS: Record<AffirmEncoding, string> = {
+    normal: "Voice played at original pitch and volume",
+    subliminal: "Pitch-shifted 2–3 octaves up — audible but below conscious detection",
+    ultrasonic: "Frequency-shifted to 17–22 kHz carrier — embedded in ultrasonic range",
+    scalar: "Phase-conjugate encoding applied — Bearden scalar wave model",
+    all: "Subliminal + Ultrasonic + Scalar applied simultaneously",
+  };
 
   // Waveform bar animated values
   const barAnims = useRef(
@@ -457,7 +490,7 @@ export default function SonifyScreen() {
 
         {/* ── Mode selector ────────────────────────────────────────────────── */}
         <View style={styles.modeRow}>
-          {(["SPECTRAL", "WAVE_GENETICS", "BIOFIELD"] as SonificationMode[]).map((m) => (
+          {(["SPECTRAL", "WAVE_GENETICS", "BIOFIELD", "CYMATICS", "BINARY"] as SonificationMode[]).map((m) => (
             <Pressable
               key={m}
               style={[
@@ -596,6 +629,40 @@ export default function SonifyScreen() {
           <Text style={styles.affirmHint}>
             Record a voice affirmation for this image — stored per-image, cleared when you select a new image.
           </Text>
+
+          {/* Encoding mode selector */}
+          <Text style={[styles.affirmHint, { marginTop: 10, marginBottom: 4, color: "#9BA1A6" }]}>
+            Encoding Mode
+          </Text>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 8 }}>
+            <View style={{ flexDirection: "row", gap: 6 }}>
+              {(["normal", "subliminal", "ultrasonic", "scalar", "all"] as AffirmEncoding[]).map((enc) => (
+                <TouchableOpacity
+                  key={enc}
+                  style={[
+                    styles.affirmEncBtn,
+                    affirmEncoding === enc && {
+                      backgroundColor: AFFIRM_ENCODING_COLORS[enc] + "33",
+                      borderColor: AFFIRM_ENCODING_COLORS[enc],
+                    },
+                  ]}
+                  onPress={() => setAffirmEncoding(enc)}
+                  activeOpacity={0.8}
+                >
+                  <Text
+                    style={[
+                      styles.affirmEncBtnText,
+                      affirmEncoding === enc && { color: AFFIRM_ENCODING_COLORS[enc] },
+                    ]}
+                  >
+                    {AFFIRM_ENCODING_LABELS[enc]}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+          </ScrollView>
+          <Text style={styles.affirmEncHint}>{AFFIRM_ENCODING_HINTS[affirmEncoding]}</Text>
+
           <View style={styles.affirmButtons}>
             <TouchableOpacity
               style={[
@@ -632,7 +699,8 @@ export default function SonifyScreen() {
           </View>
           {affirmUri && (
             <Text style={styles.affirmSaved}>
-              Affirmation saved for this image
+              ✓ Affirmation saved
+              {affirmEncoding !== "normal" ? ` · ${AFFIRM_ENCODING_LABELS[affirmEncoding]} encoding active` : ""}
             </Text>
           )}
         </View>
@@ -1048,6 +1116,25 @@ const styles = StyleSheet.create({
     fontSize: 11,
     color: "#2ECC9A",
     marginTop: 8,
+  },
+  affirmEncBtn: {
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: "#30363D",
+    backgroundColor: "#161B22",
+  },
+  affirmEncBtnText: {
+    color: "#7D8590",
+    fontWeight: "600" as const,
+    fontSize: 11,
+  },
+  affirmEncHint: {
+    fontSize: 10,
+    color: "#7D8590",
+    marginBottom: 10,
+    fontStyle: "italic" as const,
   },
   // Save section
   saveSection: {

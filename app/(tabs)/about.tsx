@@ -60,10 +60,28 @@ const THEORY_SECTIONS: Section[] = [
       "Rupert Sheldrake's theory of morphic resonance proposes that form and behavior are shaped by non-local morphic fields — invisible organizing fields that carry the memory of all previous similar forms. DNA does not contain the full blueprint for an organism; the morphic field does. This directly supports Gariaev's wave genetics: the wave program of DNA is the morphic field interface. When BioSonify converts an image into sound, it is — in Sheldrake's framework — encoding the morphic field signature of that image into an acoustic carrier that can resonate with the listener's own morphic field.",
   },
   {
+    title: "Cymatics — Chladni Plate Resonance",
+    color: "#E040FB",
+    content:
+      "Ernst Chladni (1756–1827) discovered that sand placed on a metal plate and vibrated with a violin bow arranges itself into precise geometric patterns at specific resonant frequencies — now called Chladni figures. The governing formula is f(m,n) = C×(m²+n²), where m and n are the number of nodal lines in each dimension and C is a plate-specific constant. Modern cymatics (Hans Jenny, 1967) extended this to fluids and pastes, demonstrating that sound literally sculpts matter into form. BioSonify's Cymatics mode inverts this process: it analyzes the image as a target Chladni pattern and computes the combination of modal frequencies f(m,n) whose superposition would produce that pattern on a physical plate. When the resulting audio is played through a speaker under a Chladni plate or into a cymatics app, the sand or fluid is driven toward the image's geometric structure. The 8×8 modal grid maps to 64 distinct eigenfrequencies, each weighted by the brightness of the corresponding image zone.",
+  },
+  {
+    title: "Binary Code Encoding",
+    color: "#00E5FF",
+    content:
+      "Every pixel in a digital image is represented by three 8-bit numbers (R, G, B) — a 24-bit binary code. BioSonify's Binary mode converts this raw bit-stream directly into audio: a binary 1 becomes a 2000 Hz pulse and a binary 0 becomes a 200 Hz pulse, with each pixel's luminance value shaping the amplitude envelope of its burst. The result is an acoustic encoding of the image's complete digital information — every bit of every pixel, in sequence, expressed as sound. This is conceptually related to data sonification techniques used in radio astronomy (SETI signals), DNA sequencing audio, and steganographic audio encoding. The binary layer is mixed at 30% over a spectral base so the result is both informationally complete and musically listenable. In principle, the original image could be reconstructed from the audio by reversing the encoding.",
+  },
+  {
+    title: "Tom Bearden — Scalar Waves & DNA",
+    color: "#F0A500",
+    content:
+      "Lt. Col. Tom Bearden (ret.) developed a theoretical framework extending James Clerk Maxwell's original quaternion equations — which were simplified by Heaviside into the familiar vector form taught today. Bearden's scalar electromagnetics posits that the longitudinal (scalar) component of the electromagnetic field, discarded by Heaviside, carries the most biologically significant information. Scalar waves are described as phase-conjugate pairs: a wave and its time-reversed twin that cancel in the transverse (observable) domain but reinforce in the longitudinal (scalar) domain. Bearden proposed that scalar fields interact directly with the vacuum energy structure and with DNA's torsion field (consistent with Gariaev's wave genetics). BioSonify's Scalar mode implements the phase-conjugate pair model: every audio carrier is accompanied by a 180° phase-shifted twin at 50% amplitude, creating the acoustic analog of Bearden's scalar encoding. The intent is that the resulting field structure resonates with the DNA's longitudinal wave receptor.",
+  },
+  {
     title: "How BioSonify Works",
     color: "#2ECC9A",
     content:
-      "BioSonify implements three sonification engines. The Spectral Scan engine maps each image column to a time slice, vertical pixel position to frequency (200–4000 Hz), brightness to amplitude, and hue to timbre blend (sine/triangle/sawtooth). The Wave Genetics engine treats the image as a biophoton emission map: average luminance modulates a 40 Hz coherence carrier, while the R, G, B channel averages amplitude-modulate 396, 528, and 741 Hz Solfeggio carriers respectively. The Biofield Overlay engine combines the Spectral base with additive synthesis of any user-selected carriers from the Frequency Library — Schumann resonances, Solfeggio tones, brainwave entrainment frequencies, and Rife frequencies. All synthesis is performed in pure JavaScript using the Web Audio API's PCM encoding, producing a standard WAV file that can be exported and shared.",
+      "BioSonify v9 implements five synthesis engines, all operating at 128×128 pixel resolution with per-pixel frequency assignment to ensure every image produces a unique audio fingerprint. The Spectral Scan engine maps each pixel's exact (row, col) position to a unique frequency via a 2D log-frequency grid. The Wave Genetics engine assigns each pixel its own frequency burst with a position-derived phase seed, ensuring different images produce statistically distinct audio. The Biofield Overlay engine adds pixel-driven biofield carriers. The Cymatics engine computes Chladni eigenfrequencies from the image's modal structure. The Binary engine converts every pixel's RGB bytes to a 24-bit pulse-stream. All engines support HRTF brain-region spatialization (23 anatomical regions including basal ganglia, thalamus, insula, VTA, and raphe nuclei), Bearden scalar encoding, and per-image affirmation recording with Normal / Subliminal / Ultrasonic / Scalar / All encoding options.",
   },
 ];
 
