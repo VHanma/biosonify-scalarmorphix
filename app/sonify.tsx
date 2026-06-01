@@ -1,3 +1,16 @@
+/**
+ * app/sonify.tsx
+ * ─────────────────────────────────────────────────────────────────────────────
+ * BioSonify Sonification Player Screen
+ *
+ * Features:
+ *  • Spectral / Wave Genetics / Biofield synthesis modes
+ *  • HRTF brain-region spatialization (15 regions)
+ *  • Bearden scalar wave encoding toggle
+ *  • Per-image affirmation recorder (stored keyed by imageUri in AsyncStorage)
+ *  • Save: Individual / Combined / Stacked WAV export
+ */
+
 import { useState, useEffect, useRef, useCallback } from "react";
 import {
   View,
@@ -12,10 +25,20 @@ import {
   Alert,
   ActivityIndicator,
   Modal,
+  TouchableOpacity,
 } from "react-native";
 import { useRouter } from "expo-router";
 import * as FileSystem from "expo-file-system/legacy";
-import { setAudioModeAsync, useAudioPlayer } from "expo-audio";
+import {
+  createAudioPlayer,
+  RecordingPresets,
+  requestRecordingPermissionsAsync,
+  setAudioModeAsync,
+  useAudioPlayer,
+  useAudioRecorder,
+  useAudioRecorderState,
+} from "expo-audio";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import { ScreenContainer } from "@/components/screen-container";
 import { IconSymbol } from "@/components/ui/icon-symbol";
 import { useSonification } from "@/lib/sonification-store";
@@ -32,9 +55,17 @@ import {
   saveCombinedTones,
   saveStackedOutput,
 } from "@/lib/save-audio";
+import {
+  applyBrainRegionHRTF,
+  BRAIN_REGION_POSITIONS,
+  type BrainRegion,
+} from "@/lib/hrtf-engine";
+import { applyScalarEncoding } from "@/lib/scalar-encoder";
 
 const { width: SCREEN_W } = Dimensions.get("window");
 const BAR_COUNT = 50;
+
+const AFFIRMATION_KEY_PREFIX = "@biosonify_affirm_";
 
 const MODE_LABELS: Record<SonificationMode, string> = {
   SPECTRAL: "Spectral",
@@ -57,13 +88,18 @@ const MODE_DESCRIPTIONS: Record<SonificationMode, string> = {
     "Full spectral scan + pixel-driven biofield carriers (amplitude & phase from image data)",
 };
 
+const BRAIN_REGION_LIST: { key: BrainRegion; label: string }[] = Object.entries(
+  BRAIN_REGION_POSITIONS
+).map(([key, pos]) => ({ key: key as BrainRegion, label: pos.label }));
+
 /** Write WAV ArrayBuffer to a cache file and return a file:// URI (or data: on web). */
-async function writeWavToFile(wavBuffer: ArrayBuffer): Promise<string> {
+async function writeWavToFile(wavBuffer: ArrayBuffer, filename?: string): Promise<string> {
   if (Platform.OS === "web") {
     const base64 = arrayBufferToBase64(wavBuffer);
     return `data:audio/wav;base64,${base64}`;
   }
-  const path = (FileSystem.cacheDirectory ?? "") + "biosonify-output.wav";
+  const fname = filename ?? "biosonify-output.wav";
+  const path = (FileSystem.cacheDirectory ?? "") + fname;
   const base64 = arrayBufferToBase64(wavBuffer);
   await FileSystem.writeAsStringAsync(path, base64, {
     encoding: FileSystem.EncodingType.Base64,
@@ -81,7 +117,19 @@ export default function SonifyScreen() {
   const [showSaveMenu, setShowSaveMenu] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
 
-  // Waveform bar animated values — only updated from real synthesis data
+  // HRTF + Scalar state
+  const [brainRegion, setBrainRegion] = useState<BrainRegion>("whole_brain");
+  const [scalarEnabled, setScalarEnabled] = useState(false);
+  const [showBrainPicker, setShowBrainPicker] = useState(false);
+
+  // Per-image affirmation recorder
+  const audioRecorder = useAudioRecorder(RecordingPresets.HIGH_QUALITY);
+  const recorderState = useAudioRecorderState(audioRecorder);
+  const [affirmUri, setAffirmUri] = useState<string | null>(null);
+  const affirmPlayerRef = useRef<ReturnType<typeof createAudioPlayer> | null>(null);
+  const [affirmPlaying, setAffirmPlaying] = useState(false);
+
+  // Waveform bar animated values
   const barAnims = useRef(
     Array.from({ length: BAR_COUNT }, () => new Animated.Value(0))
   ).current;
@@ -105,10 +153,31 @@ export default function SonifyScreen() {
     }
   }, [state.waveformBars]);
 
+  // Initialize audio mode and request recording permission
   useEffect(() => {
-    setAudioModeAsync({ playsInSilentMode: true }).catch(() => {});
-    return () => { player.release(); };
+    (async () => {
+      await setAudioModeAsync({ playsInSilentMode: true });
+      await requestRecordingPermissionsAsync();
+    })();
+    return () => {
+      player.release();
+      affirmPlayerRef.current?.remove();
+    };
   }, []);
+
+  // Load affirmation URI from AsyncStorage when image changes
+  useEffect(() => {
+    if (!state.imageUri) {
+      setAffirmUri(null);
+      return;
+    }
+    const key = AFFIRMATION_KEY_PREFIX + encodeURIComponent(state.imageUri);
+    AsyncStorage.getItem(key).then((stored) => {
+      setAffirmUri(stored ?? null);
+    });
+  }, [state.imageUri]);
+
+  // ── Synthesis ─────────────────────────────────────────────────────────────
 
   const synthesize = useCallback(async () => {
     if (!state.imageUri) return;
@@ -122,15 +191,36 @@ export default function SonifyScreen() {
         carrierFrequencies: enabledHz,
         sampleRate: 44100,
       });
-      const wavBuffer = encodeWav(samples, 44100);
+
+      // Apply HRTF brain-region spatialization
+      const hrtfApplied =
+        brainRegion !== "whole_brain"
+          ? applyBrainRegionHRTF(samples, brainRegion)
+          : samples;
+
+      // Apply Bearden scalar encoding
+      const encoded = scalarEnabled ? applyScalarEncoding(hrtfApplied, 0.5) : hrtfApplied;
+
+      const wavBuffer = encodeWav(encoded, 44100);
       const audioUri = await writeWavToFile(wavBuffer);
-      const bars = extractWaveformBars(samples, BAR_COUNT);
+      const bars = extractWaveformBars(encoded, BAR_COUNT);
       dispatch({ type: "SET_AUDIO", wavBuffer, audioUri, waveformBars: bars });
     } catch (e) {
       dispatch({ type: "SET_PROCESSING", processing: false });
       Alert.alert("Synthesis failed", String(e));
     }
-  }, [state.imageUri, state.mode, state.durationSeconds, extractPixels, getEnabledHz, dispatch]);
+  }, [
+    state.imageUri,
+    state.mode,
+    state.durationSeconds,
+    brainRegion,
+    scalarEnabled,
+    extractPixels,
+    getEnabledHz,
+    dispatch,
+  ]);
+
+  // ── Playback ──────────────────────────────────────────────────────────────
 
   const handlePlay = useCallback(async () => {
     if (!state.audioUri) {
@@ -171,7 +261,46 @@ export default function SonifyScreen() {
     dispatch({ type: "SET_PLAYING", playing: false });
   }, [player, dispatch]);
 
-  // ── Save handlers ────────────────────────────────────────────────────────────
+  // ── Affirmation recorder ──────────────────────────────────────────────────
+
+  const startAffirmation = useCallback(async () => {
+    await audioRecorder.prepareToRecordAsync();
+    audioRecorder.record();
+  }, [audioRecorder]);
+
+  const stopAffirmation = useCallback(async () => {
+    await audioRecorder.stop();
+    const uri = audioRecorder.uri;
+    if (uri && state.imageUri) {
+      setAffirmUri(uri);
+      const key = AFFIRMATION_KEY_PREFIX + encodeURIComponent(state.imageUri);
+      await AsyncStorage.setItem(key, uri);
+    }
+  }, [audioRecorder, state.imageUri]);
+
+  const clearAffirmation = useCallback(async () => {
+    setAffirmUri(null);
+    if (state.imageUri) {
+      const key = AFFIRMATION_KEY_PREFIX + encodeURIComponent(state.imageUri);
+      await AsyncStorage.removeItem(key);
+    }
+  }, [state.imageUri]);
+
+  const toggleAffirmPlayback = useCallback(() => {
+    if (!affirmUri) return;
+    if (affirmPlaying) {
+      affirmPlayerRef.current?.pause();
+      setAffirmPlaying(false);
+    } else {
+      affirmPlayerRef.current?.remove();
+      const p = createAudioPlayer({ uri: affirmUri });
+      affirmPlayerRef.current = p;
+      p.play();
+      setAffirmPlaying(true);
+    }
+  }, [affirmUri, affirmPlaying]);
+
+  // ── Save handlers ─────────────────────────────────────────────────────────
 
   const handleSaveIndividual = useCallback(async () => {
     if (!state.wavBuffer) {
@@ -183,14 +312,14 @@ export default function SonifyScreen() {
     try {
       await saveIndividualSonification(
         state.wavBuffer,
-        `BioSonify_${state.mode}_${state.durationSeconds}s`
+        `BioSonify_${state.mode}_${brainRegion}_${state.durationSeconds}s`
       );
     } catch (e) {
       Alert.alert("Save failed", String(e));
     } finally {
       setIsSaving(false);
     }
-  }, [state.wavBuffer, state.mode, state.durationSeconds]);
+  }, [state.wavBuffer, state.mode, brainRegion, state.durationSeconds]);
 
   const handleSaveCombined = useCallback(async () => {
     const enabled = getEnabledFrequencies();
@@ -224,6 +353,8 @@ export default function SonifyScreen() {
 
   const imageAreaW = SCREEN_W - 32;
   const imageAreaH = Math.round(imageAreaW * 0.6);
+
+  const currentRegionLabel = BRAIN_REGION_POSITIONS[brainRegion].label;
 
   return (
     <ScreenContainer containerClassName="bg-background" className="bg-background">
@@ -296,7 +427,7 @@ export default function SonifyScreen() {
           )}
         </View>
 
-        {/* ── Waveform — real data only ────────────────────────────────────── */}
+        {/* ── Waveform ─────────────────────────────────────────────────────── */}
         <View style={styles.waveformRow}>
           {barAnims.map((anim, i) => (
             <Animated.View
@@ -351,6 +482,40 @@ export default function SonifyScreen() {
         </View>
         <Text style={styles.modeDesc}>{MODE_DESCRIPTIONS[state.mode]}</Text>
 
+        {/* ── HRTF Brain Region Selector ───────────────────────────────────── */}
+        <View style={styles.sectionContainer}>
+          <Text style={styles.sectionLabel}>HRTF Brain Region</Text>
+          <TouchableOpacity
+            style={styles.regionSelector}
+            onPress={() => setShowBrainPicker(true)}
+            activeOpacity={0.8}
+          >
+            <View style={styles.regionDot} />
+            <Text style={styles.regionText}>{currentRegionLabel}</Text>
+            <Text style={styles.regionChevron}>›</Text>
+          </TouchableOpacity>
+          <Text style={styles.regionHint}>
+            Frequencies will appear to originate from this brain region through headphones
+          </Text>
+        </View>
+
+        {/* ── Bearden Scalar Toggle ────────────────────────────────────────── */}
+        <TouchableOpacity
+          style={styles.scalarRow}
+          onPress={() => setScalarEnabled((v) => !v)}
+          activeOpacity={0.8}
+        >
+          <View style={styles.scalarTextContainer}>
+            <Text style={styles.scalarTitle}>Bearden Scalar Encoding</Text>
+            <Text style={styles.scalarDesc}>
+              Phase-conjugate pair — longitudinal scalar wave for DNA interaction
+            </Text>
+          </View>
+          <View style={[styles.toggleSwitch, { backgroundColor: scalarEnabled ? "#2ECC9A" : "#30363D" }]}>
+            <View style={[styles.toggleKnob, { transform: [{ translateX: scalarEnabled ? 18 : 0 }] }]} />
+          </View>
+        </TouchableOpacity>
+
         {/* ── Playback controls ────────────────────────────────────────────── */}
         <View style={styles.controls}>
           <Pressable
@@ -395,7 +560,7 @@ export default function SonifyScreen() {
 
         <Text style={styles.controlHint}>
           {state.audioUri
-            ? "Audio ready · Tap ⚡ to re-synthesize · Tap 💾 to save"
+            ? `Audio ready · ${currentRegionLabel}${scalarEnabled ? " · Scalar" : ""} · Tap ⚡ to re-synthesize`
             : state.imageUri
             ? "Tap ▶ to synthesize — every pixel will be translated to sound"
             : "Select an image from the home screen first"}
@@ -425,11 +590,57 @@ export default function SonifyScreen() {
           ))}
         </View>
 
+        {/* ── Affirmation Recorder ─────────────────────────────────────────── */}
+        <View style={styles.affirmSection}>
+          <Text style={styles.sectionLabel}>Personal Affirmation</Text>
+          <Text style={styles.affirmHint}>
+            Record a voice affirmation for this image — stored per-image, cleared when you select a new image.
+          </Text>
+          <View style={styles.affirmButtons}>
+            <TouchableOpacity
+              style={[
+                styles.affirmBtn,
+                { backgroundColor: recorderState.isRecording ? "#EF4444" : "#2ECC9A" },
+              ]}
+              onPress={recorderState.isRecording ? stopAffirmation : startAffirmation}
+              activeOpacity={0.8}
+            >
+              <Text style={styles.affirmBtnText}>
+                {recorderState.isRecording ? "Stop" : "Record"}
+              </Text>
+            </TouchableOpacity>
+            {affirmUri && (
+              <>
+                <TouchableOpacity
+                  style={[styles.affirmBtn, { backgroundColor: "#30363D" }]}
+                  onPress={toggleAffirmPlayback}
+                  activeOpacity={0.8}
+                >
+                  <Text style={[styles.affirmBtnText, { color: "#E6EDF3" }]}>
+                    {affirmPlaying ? "Pause" : "Preview"}
+                  </Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.affirmBtn, { backgroundColor: "#30363D" }]}
+                  onPress={clearAffirmation}
+                  activeOpacity={0.8}
+                >
+                  <Text style={[styles.affirmBtnText, { color: "#7D8590" }]}>Clear</Text>
+                </TouchableOpacity>
+              </>
+            )}
+          </View>
+          {affirmUri && (
+            <Text style={styles.affirmSaved}>
+              Affirmation saved for this image
+            </Text>
+          )}
+        </View>
+
         {/* ── Save section ─────────────────────────────────────────────────── */}
         <View style={styles.saveSection}>
           <Text style={styles.saveSectionTitle}>Save Audio</Text>
           <View style={styles.saveRow}>
-            {/* Individual */}
             <Pressable
               style={({ pressed }) => [
                 styles.saveCard,
@@ -444,7 +655,6 @@ export default function SonifyScreen() {
               <Text style={styles.saveCardDesc}>Image sonification only</Text>
             </Pressable>
 
-            {/* Combined */}
             <Pressable
               style={({ pressed }) => [
                 styles.saveCard,
@@ -458,7 +668,6 @@ export default function SonifyScreen() {
               <Text style={styles.saveCardDesc}>All active frequencies mixed</Text>
             </Pressable>
 
-            {/* Stacked */}
             <Pressable
               style={({ pressed }) => [
                 styles.saveCard,
@@ -481,6 +690,48 @@ export default function SonifyScreen() {
           )}
         </View>
       </ScrollView>
+
+      {/* ── Brain Region Picker Modal ────────────────────────────────────────── */}
+      <Modal
+        visible={showBrainPicker}
+        animationType="slide"
+        presentationStyle="pageSheet"
+        onRequestClose={() => setShowBrainPicker(false)}
+      >
+        <View style={styles.modalSheet}>
+          <View style={styles.modalSheetHeader}>
+            <Text style={styles.modalSheetTitle}>Select Brain Region</Text>
+            <TouchableOpacity onPress={() => setShowBrainPicker(false)}>
+              <Text style={styles.modalSheetDone}>Done</Text>
+            </TouchableOpacity>
+          </View>
+          <ScrollView>
+            {BRAIN_REGION_LIST.map((item) => (
+              <TouchableOpacity
+                key={item.key}
+                style={[
+                  styles.regionRow,
+                  brainRegion === item.key && styles.regionRowSelected,
+                ]}
+                onPress={() => {
+                  setBrainRegion(item.key);
+                  setShowBrainPicker(false);
+                  // Clear cached audio so it gets re-synthesized with new region
+                  dispatch({ type: "CLEAR_AUDIO" });
+                }}
+                activeOpacity={0.8}
+              >
+                <Text style={[styles.regionRowText, brainRegion === item.key && { color: "#2ECC9A" }]}>
+                  {item.label}
+                </Text>
+                {brainRegion === item.key && (
+                  <Text style={styles.regionRowCheck}>✓</Text>
+                )}
+              </TouchableOpacity>
+            ))}
+          </ScrollView>
+        </View>
+      </Modal>
 
       {/* ── Save menu modal ──────────────────────────────────────────────────── */}
       <Modal
@@ -645,9 +896,77 @@ const styles = StyleSheet.create({
     color: "#7D8590",
     textAlign: "center",
     paddingHorizontal: 20,
-    marginBottom: 20,
+    marginBottom: 16,
     lineHeight: 16,
   },
+  // HRTF Section
+  sectionContainer: {
+    paddingHorizontal: 16,
+    marginBottom: 12,
+  },
+  sectionLabel: {
+    fontSize: 12,
+    fontWeight: "700",
+    color: "#7D8590",
+    textTransform: "uppercase",
+    letterSpacing: 0.8,
+    marginBottom: 8,
+  },
+  regionSelector: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "#161B22",
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: "#30363D",
+    padding: 12,
+    gap: 10,
+  },
+  regionDot: {
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+    backgroundColor: "#2ECC9A",
+  },
+  regionText: { flex: 1, fontSize: 14, fontWeight: "600", color: "#E6EDF3" },
+  regionChevron: { fontSize: 20, color: "#7D8590" },
+  regionHint: {
+    fontSize: 10,
+    color: "#7D8590",
+    marginTop: 6,
+    lineHeight: 14,
+  },
+  // Scalar Toggle
+  scalarRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    marginHorizontal: 16,
+    marginBottom: 16,
+    backgroundColor: "#161B22",
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: "#30363D",
+  },
+  scalarTextContainer: { flex: 1, marginRight: 12 },
+  scalarTitle: { fontSize: 13, fontWeight: "700", color: "#E6EDF3", marginBottom: 2 },
+  scalarDesc: { fontSize: 10, color: "#7D8590", lineHeight: 14 },
+  toggleSwitch: {
+    width: 44,
+    height: 26,
+    borderRadius: 13,
+    padding: 3,
+    justifyContent: "center",
+  },
+  toggleKnob: {
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    backgroundColor: "#fff",
+  },
+  // Playback controls
   controls: {
     flexDirection: "row",
     alignItems: "center",
@@ -686,7 +1005,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
     gap: 8,
     paddingHorizontal: 16,
-    marginBottom: 24,
+    marginBottom: 20,
   },
   durationLabel: {
     fontSize: 12,
@@ -707,7 +1026,30 @@ const styles = StyleSheet.create({
   },
   durationBtnText: { fontSize: 12, color: "#7D8590", fontWeight: "600" },
   durationBtnTextActive: { color: "#2ECC9A" },
-  // ── Save section ──────────────────────────────────────────────────────────
+  // Affirmation section
+  affirmSection: {
+    paddingHorizontal: 16,
+    marginBottom: 20,
+  },
+  affirmHint: {
+    fontSize: 11,
+    color: "#7D8590",
+    lineHeight: 16,
+    marginBottom: 10,
+  },
+  affirmButtons: { flexDirection: "row", gap: 8, flexWrap: "wrap" },
+  affirmBtn: {
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 20,
+  },
+  affirmBtnText: { color: "#0D1117", fontWeight: "700", fontSize: 12 },
+  affirmSaved: {
+    fontSize: 11,
+    color: "#2ECC9A",
+    marginTop: 8,
+  },
+  // Save section
   saveSection: {
     paddingHorizontal: 16,
   },
@@ -754,7 +1096,33 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   savingText: { fontSize: 12, color: "#2ECC9A" },
-  // ── Save menu modal ────────────────────────────────────────────────────────
+  // Brain region picker modal
+  modalSheet: {
+    flex: 1,
+    backgroundColor: "#161B22",
+  },
+  modalSheetHeader: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    padding: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: "#30363D",
+  },
+  modalSheetTitle: { fontSize: 18, fontWeight: "700", color: "#E6EDF3" },
+  modalSheetDone: { fontSize: 16, fontWeight: "600", color: "#2ECC9A" },
+  regionRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    padding: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: "#30363D",
+  },
+  regionRowSelected: { backgroundColor: "#0D1117" },
+  regionRowText: { fontSize: 15, color: "#E6EDF3" },
+  regionRowCheck: { fontSize: 18, color: "#2ECC9A", fontWeight: "700" },
+  // Save menu modal
   modalOverlay: {
     flex: 1,
     backgroundColor: "rgba(0,0,0,0.6)",

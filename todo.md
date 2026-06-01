@@ -67,19 +67,48 @@
 - [x] Confirm dev preview loads without white/black screen
 
 ## Gariaev Signal Chain Rebuild (v7)
-- [ ] Analyze all 6 Gariaev matrix YouTube recordings for acoustic character
-- [ ] Research exact He-Ne 632.8nm / 660nm / 950nm laser parameters and WSRW downconversion
-- [ ] Build WSRW downconversion math model (optical freq → radio → audio)
-- [ ] Implement dual orthogonal polarization modes (H and V channels → stereo)
-- [ ] Implement spatial feature modulation from image scan (per-column polarization angle)
-- [ ] Rebuild Wave Genetics engine with correct physics
-- [ ] Add polarization-based stereo encoding (H-pol = left channel, V-pol = right channel)
-- [ ] Verify deterministic output — same image always same sound
+- [x] Analyze all 6 Gariaev matrix YouTube recordings for acoustic character
+- [x] Research exact He-Ne 632.8nm / 660nm / 950nm laser parameters and WSRW downconversion
+- [x] Build WSRW downconversion math model (optical freq → radio → audio)
+- [x] Implement dual orthogonal polarization modes (H and V channels → stereo)
+- [x] Implement spatial feature modulation from image scan (per-column polarization angle)
+- [x] Rebuild Wave Genetics engine with correct physics
+- [x] Add polarization-based stereo encoding (H-pol = left channel, V-pol = right channel)
+- [x] Verify deterministic output — same image always same sound
 
 ## THz / GHz / Ultrasonic Biofrequency Integration (v7 continued)
-- [ ] Research THz window frequencies that affect DNA hydrogen bonding and protein folding
-- [ ] Research GHz millimeter-wave frequencies affecting membrane permeability and cellular signaling
-- [ ] Research therapeutic ultrasound frequencies (20kHz–3MHz) for mechanotransduction, bone repair, neurogenesis, BDNF
-- [ ] Research infrasound and low-frequency acoustic bioeffects
-- [ ] Add all new entries to FREQUENCY_LIBRARY with correct downconversion to audible equivalents
-- [ ] Add THz, GHz, Ultrasonic categories to frequency library screen
+- [x] Research THz window frequencies that affect DNA hydrogen bonding and protein folding
+- [x] Research GHz millimeter-wave frequencies affecting membrane permeability and cellular signaling
+- [x] Research therapeutic ultrasound frequencies (20kHz–3MHz) for mechanotransduction, bone repair, neurogenesis, BDNF
+- [x] Research infrasound and low-frequency acoustic bioeffects
+- [x] Add all new entries to FREQUENCY_LIBRARY with correct downconversion to audible equivalents
+- [x] Add THz, GHz, Ultrasonic categories to frequency library screen
+
+## v8 Features: HRTF Spatialization, God Helmet, Affirmations, Scalar Waves
+
+### HRTF Brain-Region Spatialization
+- [x] Research HRTF coefficients for anatomical brain positions (pineal, amygdala, PFC, cerebellum, etc.)
+- [x] Build lib/hrtf-engine.ts with ITD/ILD/pinna filter model for each brain region
+- [x] Map each frequency category to a default brain region
+- [x] Allow user to override region per frequency
+- [x] Render all audio with HRTF spatialization applied to stereo WAV output
+
+### God Helmet Emotion/State Presets
+- [x] Research Persinger God Helmet frequency protocols and brain-region targets
+- [x] Build 12 emotion/state presets (divine, euphoria, deep calm, focus, creativity, grief release, lucid dream, etc.)
+- [x] Each preset specifies: frequency set + brain region + waveform type + duration
+- [x] Add God Helmet preset selector screen/modal to the player (Brain tab)
+
+### Per-Image Affirmation Recorder
+- [x] Add affirmation recorder section to the player screen
+- [x] Record audio using expo-audio microphone
+- [x] Save affirmation per image URI using AsyncStorage
+- [x] Clear affirmation automatically when new image is loaded
+- [x] Include affirmation audio in stacked WAV export (layered under sonification)
+- [x] Playback affirmation preview before saving
+
+### Bearden Scalar Wave Encoding
+- [x] Research Bearden scalar wave / phase-conjugate math model
+- [x] Implement phase-conjugate pair encoding: every carrier gets a 180° phase-shifted twin
+- [x] Apply scalar encoding to all three synthesis engines
+- [x] Add scalar mode toggle in settings/player

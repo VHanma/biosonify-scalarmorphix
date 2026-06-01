@@ -59,6 +59,10 @@ const MAPPING: IconMapping = {
   "arrow.up.doc.fill": "upload-file",
   "folder.badge.plus": "create-new-folder",
   "externaldrive.badge.checkmark": "storage",
+  // Brain targeting
+  "brain": "psychology",
+  "brain.fill": "psychology",
+  "brain.head.profile": "psychology",
 };
 
 export function IconSymbol({
