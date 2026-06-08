@@ -32,6 +32,14 @@
  * ── MODE 5: BINARY CODE ──────────────────────────────────────────────────────
  */
 
+import {
+  extractSpinorFrequencies,
+  computeHolographicFrequency,
+  computeSpinCoherence,
+  computeSpinModulationDepth,
+  pixelToStokes,
+} from "./spinor-spectrum";
+
 export type SonificationMode =
   | "WAVE_GENETICS"
   | "SPECTRAL"
@@ -52,6 +60,9 @@ export interface SonificationOptions {
   durationSeconds: number;
   carrierFrequencies: number[];
   sampleRate: number;
+  spinorFrequencies?: number[]; // Pre-computed spinor spectrum (optional cache)
+  holographicFrequency?: number; // Pre-computed holographic frequency
+  spinCoherence?: number; // Pre-computed spin coherence
 }
 
 /** Called with progress 0.0–1.0 during async synthesis */
@@ -716,6 +727,13 @@ export async function synthesizeFromPixelsAsync(
 ): Promise<Float32Array> {
   const { mode, durationSeconds, carrierFrequencies, sampleRate } = options;
   const totalSamples = Math.floor(sampleRate * durationSeconds);
+
+  // Pre-compute spinor spectrum on first call (cache in options if needed)
+  if (!options.spinorFrequencies) {
+    options.spinorFrequencies = extractSpinorFrequencies(pixels, width, height);
+    options.holographicFrequency = computeHolographicFrequency(pixels);
+    options.spinCoherence = computeSpinCoherence(pixels);
+  }
   switch (mode) {
     case "WAVE_GENETICS":
       return waveGenetics(pixels, width, height, totalSamples, sampleRate, onProgress);

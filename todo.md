@@ -204,3 +204,19 @@
 - [x] Toggle between pattern-only, image-only, and overlay view
 - [x] Pattern color matches the current preset color
 - [x] Integrated into Brain tab with preset frequency display
+
+
+## v12: Gariaev Spinor Spectrum Model ✅
+
+### Spinor Spectrum Extraction
+- [x] Build spinor-spectrum.ts: pixel RGB → Stokes polarization parameters (S0, S1, S2, S3)
+- [x] Extract spinor frequencies: spatial derivatives of polarization field → eigenfrequencies
+- [x] Compute holographic frequency: net spin magnitude → carrier frequency
+- [x] Compute spin coherence: measure of polarization organization (0–1)
+- [x] Compute spin modulation depth: information content richness
+
+### Engine Integration
+- [x] Add spinor pre-computation to synthesizeFromPixelsAsync
+- [x] Cache spinor data in SonificationOptions for reuse across modes
+- [x] All five modes now have access to spinor spectrum as foundation
+- [x] Tests: 28/28 passing, TypeScript: 0 errors
