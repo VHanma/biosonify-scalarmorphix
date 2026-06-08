@@ -37,7 +37,8 @@ export type SonificationMode =
   | "SPECTRAL"
   | "BIOFIELD"
   | "CYMATICS"
-  | "BINARY";
+  | "BINARY"
+  | "SIMULTANEOUS";
 
 export interface PixelData {
   r: number; // 0–255
@@ -395,6 +396,33 @@ async function biofield(
   const R = new Float32Array(totalSamples);
   const samplesPerCol = totalSamples / width;
   const phaseAcc = new Float64Array(carriers.length);
+  const ampScale = 1 / (carriers.length * height);
+
+  // Pre-compute per-pixel amplitude (lum) and phase seed to avoid recalculation
+  const pixelAmp = new Float32Array(width * height);
+  const pixelPhaseSeed = new Float32Array(width * height);
+  const pixelHue = new Float32Array(width * height);
+  const pixelIsLeft = new Uint8Array(width * height);
+
+  for (let i = 0; i < width * height; i++) {
+    const px = pixels[i];
+    if (!px || px.a < 4) {
+      pixelAmp[i] = 0;
+      continue;
+    }
+    pixelAmp[i] = lum(px);
+    const [h] = toHsv(px);
+    pixelHue[i] = h / 360;
+    const pixelSeed = (i * 2654435761) >>> 0;
+    pixelPhaseSeed[i] = (pixelSeed & 0xFFFF) / 0xFFFF;
+    pixelIsLeft[i] = i % width < midCol ? 1 : 0;
+  }
+
+  // Pre-compute sin table for faster lookup (1024 entries)
+  const sinTable = new Float32Array(1024);
+  for (let i = 0; i < 1024; i++) {
+    sinTable[i] = Math.sin(2 * Math.PI * (i / 1024));
+  }
 
   for (let col = 0; col < width; col++) {
     const s0 = Math.floor(col * samplesPerCol);
@@ -402,23 +430,22 @@ async function biofield(
     const n  = s1 - s0;
 
     for (let row = 0; row < height; row++) {
-      const px = pixels[row * width + col];
-      if (!px || px.a < 4) continue;
-      const pixLum = lum(px);
-      const [hue] = toHsv(px);
-      const pixHue = hue / 360;
-      const isLeft = col < midCol;
+      const pixIdx = row * width + col;
+      const pixLum = pixelAmp[pixIdx];
+      if (pixLum === 0) continue;
 
-      const pixelSeed = ((row * width + col) * 2654435761) >>> 0;
-      const phaseSeed = (pixelSeed & 0xFFFF) / 0xFFFF;
+      const phaseSeed = pixelPhaseSeed[pixIdx];
+      const hue = pixelHue[pixIdx];
+      const isLeft = pixelIsLeft[pixIdx];
 
       for (let ci = 0; ci < carriers.length; ci++) {
         const hz = carriers[ci];
         const dt = hz / sampleRate;
         for (let s = s0; s < s1; s++) {
           const lt = s - s0;
-          const ph = (phaseSeed + phaseAcc[ci] + lt * dt + pixHue) % 1;
-          const sig = pixLum * Math.sin(2 * Math.PI * ph) / (carriers.length * height);
+          const ph = (phaseSeed + phaseAcc[ci] + lt * dt + hue) % 1;
+          const sinIdx = Math.floor(ph * 1024) & 1023;
+          const sig = pixLum * sinTable[sinIdx] * ampScale;
           if (isLeft) L[s] += sig;
           else        R[s] += sig;
         }
@@ -626,6 +653,58 @@ export function synthesizeFromPixels(
   return result ?? new Float32Array(0);
 }
 
+/** Simultaneous synthesis: mix all five modes together. */
+async function simultaneous(
+  pixels: PixelData[], width: number, height: number,
+  totalSamples: number, sampleRate: number, carriers: number[],
+  onProgress?: ProgressCallback,
+): Promise<Float32Array> {
+  const modes: SonificationMode[] = ["SPECTRAL", "WAVE_GENETICS", "BIOFIELD", "CYMATICS", "BINARY"];
+  const tracks: Float32Array[] = [];
+
+  for (let i = 0; i < modes.length; i++) {
+    const mode = modes[i];
+    const progressStart = i / modes.length;
+    const progressEnd = (i + 1) / modes.length;
+    let track: Float32Array;
+
+    if (mode === "BIOFIELD") {
+      track = await biofield(pixels, width, height, totalSamples, sampleRate, carriers,
+        onProgress ? (p) => onProgress(progressStart + p * (progressEnd - progressStart)) : undefined);
+    } else {
+      const opts: SonificationOptions = {
+        mode,
+        durationSeconds: totalSamples / sampleRate,
+        carrierFrequencies: carriers,
+        sampleRate,
+      };
+      track = await synthesizeFromPixelsAsync(pixels, width, height, opts,
+        onProgress ? (p) => onProgress(progressStart + p * (progressEnd - progressStart)) : undefined);
+    }
+    tracks.push(track);
+  }
+
+  // Mix all five tracks at equal amplitude
+  const stereo = new Float32Array(totalSamples * 2);
+  const scale = 0.2; // 1/5 for five tracks
+  for (const track of tracks) {
+    for (let i = 0; i < Math.min(track.length, stereo.length); i++) {
+      stereo[i] += track[i] * scale;
+    }
+  }
+
+  // Normalize to prevent clipping
+  let peak = 0;
+  for (let i = 0; i < stereo.length; i++) {
+    if (Math.abs(stereo[i]) > peak) peak = Math.abs(stereo[i]);
+  }
+  if (peak > 1e-9) {
+    const norm = 0.92 / peak;
+    for (let i = 0; i < stereo.length; i++) stereo[i] *= norm;
+  }
+  return stereo;
+}
+
 /**
  * Async synthesis with progress callbacks — use this in the UI.
  * Yields to the event loop every COLS_PER_CHUNK columns so the UI stays responsive.
@@ -648,6 +727,8 @@ export async function synthesizeFromPixelsAsync(
       return cymatics(pixels, width, height, totalSamples, sampleRate, onProgress);
     case "BINARY":
       return binary(pixels, width, height, totalSamples, sampleRate, onProgress);
+    case "SIMULTANEOUS":
+      return simultaneous(pixels, width, height, totalSamples, sampleRate, carrierFrequencies, onProgress);
     default:
       return waveGenetics(pixels, width, height, totalSamples, sampleRate, onProgress);
   }

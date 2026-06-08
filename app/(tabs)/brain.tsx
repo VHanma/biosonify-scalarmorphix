@@ -27,6 +27,7 @@ import {
   View,
 } from "react-native";
 import { ScreenContainer } from "@/components/screen-container";
+import { CymaticsVisualizer } from "@/components/cymatics-visualizer";
 import { useColors } from "@/hooks/use-colors";
 import {
   BRAIN_REGION_POSITIONS,
@@ -83,6 +84,7 @@ export default function BrainScreen() {
   const [isPlaying, setIsPlaying] = useState(false);
   const [showPresetModal, setShowPresetModal] = useState(false);
   const [affirmUri, setAffirmUri] = useState<string | null>(null);
+  const [cymaticsMode, setCymaticsMode] = useState<"pattern-only" | "image-only" | "overlay">("overlay");
   const playerRef = useRef<ReturnType<typeof createAudioPlayer> | null>(null);
 
   // Affirmation recorder — use RecordingPresets.HIGH_QUALITY (correct shape)
@@ -203,6 +205,41 @@ export default function BrainScreen() {
           </View>
           <Text style={[styles.chevron, { color: colors.muted }]}>›</Text>
         </TouchableOpacity>
+
+        {/* Cymatics Visualizer */}
+        <View style={[styles.cymaticsSection, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+          <Text style={[styles.sectionTitle, { color: colors.foreground }]}>Cymatics Pattern</Text>
+          <CymaticsVisualizer
+            frequencies={[selectedPreset.carrierHz, selectedPreset.beatHz]}
+            overlayMode={cymaticsMode}
+            patternColor={selectedPreset.color}
+            opacity={0.8}
+          />
+          <View style={styles.cymaticsControls}>
+            {(["pattern-only", "image-only", "overlay"] as const).map((mode) => (
+              <TouchableOpacity
+                key={mode}
+                style={[
+                  styles.cymaticsBtn,
+                  {
+                    backgroundColor: cymaticsMode === mode ? selectedPreset.color : colors.surface,
+                    borderColor: cymaticsMode === mode ? selectedPreset.color : colors.border,
+                  },
+                ]}
+                onPress={() => setCymaticsMode(mode)}
+              >
+                <Text
+                  style={[
+                    styles.cymaticsBtnText,
+                    { color: cymaticsMode === mode ? "#0D1117" : colors.foreground },
+                  ]}
+                >
+                  {mode === "pattern-only" ? "Pattern" : mode === "image-only" ? "Image" : "Overlay"}
+                </Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+        </View>
 
         {/* Brain Region Info */}
         <View style={[styles.infoCard, { backgroundColor: colors.surface, borderColor: colors.border }]}>
@@ -587,4 +624,26 @@ const styles = StyleSheet.create({
   presetRowName: { fontSize: 15, fontWeight: "600", marginBottom: 2 },
   presetRowRegion: { fontSize: 11 },
   checkmark: { fontSize: 18, fontWeight: "700" },
+  cymaticsSection: {
+    padding: 16,
+    borderRadius: 16,
+    borderWidth: 1,
+    marginBottom: 16,
+    alignItems: "center",
+  },
+  cymaticsControls: {
+    flexDirection: "row",
+    gap: 8,
+    marginTop: 12,
+  },
+  cymaticsBtn: {
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 8,
+    borderWidth: 1,
+  },
+  cymaticsBtnText: {
+    fontSize: 12,
+    fontWeight: "600",
+  },
 });

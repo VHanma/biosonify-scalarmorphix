@@ -74,6 +74,7 @@ const MODE_LABELS: Record<SonificationMode, string> = {
   BIOFIELD: "Biofield",
   CYMATICS: "Cymatics",
   BINARY: "Binary",
+  SIMULTANEOUS: "All Modes",
 };
 
 const MODE_COLORS: Record<SonificationMode, string> = {
@@ -82,6 +83,7 @@ const MODE_COLORS: Record<SonificationMode, string> = {
   BIOFIELD: "#4A9EFF",
   CYMATICS: "#E040FB",
   BINARY: "#00E5FF",
+  SIMULTANEOUS: "#9C27B0",
 };
 
 const MODE_DESCRIPTIONS: Record<SonificationMode, string> = {
@@ -95,6 +97,8 @@ const MODE_DESCRIPTIONS: Record<SonificationMode, string> = {
     "Chladni plate mode — audio designed to physically form the image shape on a cymatics plate",
   BINARY:
     "Every pixel's R/G/B bytes converted to binary bit-stream · 1→2000 Hz · 0→200 Hz · brightness→amplitude",
+  SIMULTANEOUS:
+    "All five modes (Spectral, Wave Genetics, Biofield, Cymatics, Binary) synthesized and mixed simultaneously",
 };
 
 const BRAIN_REGION_LIST: { key: BrainRegion; label: string }[] = Object.entries(
@@ -540,7 +544,7 @@ export default function SonifyScreen() {
 
         {/* ── Mode selector ────────────────────────────────────────────────── */}
         <View style={styles.modeRow}>
-          {(["SPECTRAL", "WAVE_GENETICS", "BIOFIELD", "CYMATICS", "BINARY"] as SonificationMode[]).map((m) => (
+          {(["SPECTRAL", "WAVE_GENETICS", "BIOFIELD", "CYMATICS", "BINARY", "SIMULTANEOUS"] as SonificationMode[]).map((m) => (
             <Pressable
               key={m}
               style={[

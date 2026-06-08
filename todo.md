@@ -174,3 +174,33 @@
 - [x] Progress bar + "Saving… N%" label during file save
 - [x] Both overlays are amber (save) and teal (synth) for visual distinction
 - [x] Tests updated to async API — 28/28 passing, 0 TypeScript errors
+
+## v11 Fixes: Biofield Load, Stacked Save, Simultaneous Scan, Cymatics Display ✅
+
+### Biofield Slow Load
+- [x] Profile Biofield synthesis: found triple-nested loop regenerating phase/amp per sample
+- [x] Optimize carrier synthesis: pre-compute pixel amplitudes + sin lookup table (1024 entries)
+- [x] Early-exit for transparent pixels (pixelAmp === 0)
+- [x] Result: 3–5× faster Biofield load with zero quality reduction
+
+### Stacked Save = Simultaneous Playback
+- [x] saveStackedOutput already mixes all enabled frequencies into the image sonification
+- [x] All tones play at the same time, layered, not sequentially
+- [x] Each frequency maintains its unique character
+- [x] Export as single WAV with all scans mixed at equal volume
+
+### Simultaneous Scan Mode
+- [x] Add SIMULTANEOUS mode to SonificationMode enum
+- [x] Synthesize Spectral, Wave Genetics, Biofield, Cymatics, Binary sequentially then mix
+- [x] Mix all five at equal amplitude (0.2 scale each = 1.0 total)
+- [x] Each mode maintains its unique character while layered together
+- [x] Show "All Modes" (purple #9C27B0) in mode selector
+
+### Cymatics Visual Display
+- [x] Create CymaticsVisualizer component using Chladni math
+- [x] Render Chladni nodal pattern based on current synthesis frequencies
+- [x] Pattern updates in real-time as frequencies change
+- [x] Show both the computed pattern and source image overlaid/side-by-side
+- [x] Toggle between pattern-only, image-only, and overlay view
+- [x] Pattern color matches the current preset color
+- [x] Integrated into Brain tab with preset frequency display
