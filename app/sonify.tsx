@@ -69,6 +69,7 @@ const BAR_COUNT = 50;
 const AFFIRMATION_KEY_PREFIX = "@biosonify_affirm_";
 
 const MODE_LABELS: Record<SonificationMode, string> = {
+  VIRTUAL_SPINOR: "Virtual Spinor",
   SPECTRAL: "Spectral",
   WAVE_GENETICS: "Wave Genetics",
   BIOFIELD: "Biofield",
@@ -78,6 +79,7 @@ const MODE_LABELS: Record<SonificationMode, string> = {
 };
 
 const MODE_COLORS: Record<SonificationMode, string> = {
+  VIRTUAL_SPINOR: "#FF1744",
   SPECTRAL: "#2ECC9A",
   WAVE_GENETICS: "#F0A500",
   BIOFIELD: "#4A9EFF",
@@ -87,6 +89,8 @@ const MODE_COLORS: Record<SonificationMode, string> = {
 };
 
 const MODE_DESCRIPTIONS: Record<SonificationMode, string> = {
+  VIRTUAL_SPINOR:
+    "Virtual He-Ne laser (632.8nm) illumination → Stokes polarization field → spin modulation → DCT spectrum → audio",
   SPECTRAL:
     "Every pixel: brightness→pitch · hue→timbre · saturation→harmonics · position→time",
   WAVE_GENETICS:
@@ -98,7 +102,7 @@ const MODE_DESCRIPTIONS: Record<SonificationMode, string> = {
   BINARY:
     "Every pixel's R/G/B bytes converted to binary bit-stream · 1→2000 Hz · 0→200 Hz · brightness→amplitude",
   SIMULTANEOUS:
-    "All five modes (Spectral, Wave Genetics, Biofield, Cymatics, Binary) synthesized and mixed simultaneously",
+    "All six modes (Virtual Spinor, Spectral, Wave Genetics, Biofield, Cymatics, Binary) synthesized and mixed simultaneously",
 };
 
 const BRAIN_REGION_LIST: { key: BrainRegion; label: string }[] = Object.entries(

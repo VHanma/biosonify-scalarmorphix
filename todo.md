@@ -220,3 +220,37 @@
 - [x] Cache spinor data in SonificationOptions for reuse across modes
 - [x] All five modes now have access to spinor spectrum as foundation
 - [x] Tests: 28/28 passing, TypeScript: 0 errors
+
+
+## v13: Gariaev Virtual Spinor Mode (Full Implementation) ✅
+
+### Spinor Spectrum Engine (spinor-spectrum.ts)
+- [x] He-Ne laser model: 632.8nm → Stokes polarization parameters (S0, S1, S2, S3)
+- [x] Stokes physics: sRGB linearization, HSV hue→polarization angle, saturation→degree of polarization
+- [x] Spin modulation field: spatial derivatives of polarization across image
+- [x] 2D DCT spectrum extraction: 32×32 modal grid → 96 top frequency bins
+- [x] Holographic frequency: RMS/net-spin computation (40–1000 Hz range)
+- [x] Spin coherence: measure of polarization organization (0–1)
+- [x] Spin modulation depth: information content richness metric
+
+### Virtual Spinor Synthesis (sonification-engine.ts)
+- [x] Add VIRTUAL_SPINOR to SonificationMode enum (primary mode)
+- [x] Implement virtualSpinor() function: DCT bins → stereo audio with He-Ne + holographic modulation
+- [x] He-Ne base carrier (26.93 Hz) gives optical identity
+- [x] Holographic carrier modulates whole-image identity
+- [x] Spin modulation depth controls vibrato strength
+- [x] Spatial DCT modes (kx, ky) control stereo field positioning
+- [x] Update synthesizeFromPixelsAsync to pre-compute spinor spectrum once
+- [x] Update simultaneous mode to include VIRTUAL_SPINOR as first mode
+- [x] Default mode is now VIRTUAL_SPINOR (Gariaev-based)
+
+### UI Integration (sonify.tsx)
+- [x] Add VIRTUAL_SPINOR to MODE_LABELS ("Virtual Spinor")
+- [x] Add VIRTUAL_SPINOR to MODE_COLORS (red #FF1744)
+- [x] Add VIRTUAL_SPINOR to MODE_DESCRIPTIONS (full He-Ne → Stokes → DCT → audio chain)
+- [x] Update SIMULTANEOUS description to include six modes
+
+### Testing
+- [x] TypeScript: 0 errors
+- [x] Tests: 28/28 passing
+- [x] All modes deterministic and independent

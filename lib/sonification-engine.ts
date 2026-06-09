@@ -33,14 +33,17 @@
  */
 
 import {
-  extractSpinorFrequencies,
+  analyzeSpinorSpectrum,
+  extractSpinorSpectrum,
   computeHolographicFrequency,
   computeSpinCoherence,
   computeSpinModulationDepth,
-  pixelToStokes,
+  HENE_AUDIO_BASE_HZ,
+  type SpinorSpectrum,
 } from "./spinor-spectrum";
 
 export type SonificationMode =
+  | "VIRTUAL_SPINOR"
   | "WAVE_GENETICS"
   | "SPECTRAL"
   | "BIOFIELD"
@@ -60,9 +63,7 @@ export interface SonificationOptions {
   durationSeconds: number;
   carrierFrequencies: number[];
   sampleRate: number;
-  spinorFrequencies?: number[]; // Pre-computed spinor spectrum (optional cache)
-  holographicFrequency?: number; // Pre-computed holographic frequency
-  spinCoherence?: number; // Pre-computed spin coherence
+  spinorSpectrum?: SpinorSpectrum; // Pre-computed spinor spectrum (optional cache)
 }
 
 /** Called with progress 0.0–1.0 during async synthesis */
@@ -170,6 +171,92 @@ function normalize(buf: Float32Array): Float32Array {
 /** Yield to the JS event loop — lets React Native process UI events between chunks */
 function yieldToUI(): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, 0));
+}
+
+// ─── ENGINE 0: VIRTUAL SPINOR (Gariaev He-Ne laser model) ────────────────────
+
+async function virtualSpinor(
+  pixels: PixelData[],
+  width: number,
+  height: number,
+  totalSamples: number,
+  sampleRate: number,
+  options: SonificationOptions,
+  onProgress?: ProgressCallback,
+): Promise<Float32Array> {
+  const spectrum =
+    options.spinorSpectrum ??
+    analyzeSpinorSpectrum(pixels, width, height);
+
+  const bins = spectrum.bins.slice(0, 48);
+
+  const L = new Float32Array(totalSamples);
+  const R = new Float32Array(totalSamples);
+
+  const carrier = spectrum.holographicFrequency;
+  const heNeBase = spectrum.carrierHz || HENE_AUDIO_BASE_HZ;
+  const coherence = Math.max(0, Math.min(1, spectrum.coherence));
+  const depth = Math.max(0, Math.min(1, spectrum.modulationDepth));
+
+  for (let i = 0; i < bins.length; i++) {
+    const bin = bins[i];
+
+    const hz = Math.max(20, Math.min(20_000, bin.hz));
+
+    // Energy controls loudness.
+    const amp =
+      0.22 *
+      Math.pow(bin.energy, 0.65) *
+      (0.35 + 0.65 * coherence) /
+      Math.sqrt(i + 1);
+
+    // Spatial DCT mode controls phase and stereo field.
+    const stereoAngle = Math.atan2(bin.ky, bin.kx + 1e-9);
+    const leftGain = 0.5 + 0.5 * Math.cos(stereoAngle);
+    const rightGain = 0.5 + 0.5 * Math.sin(stereoAngle);
+
+    const phase0 = bin.phase + (((bin.kx * 13 + bin.ky * 17) % 31) / 31) * Math.PI * 2;
+
+    for (let s = 0; s < totalSamples; s++) {
+      const t = s / sampleRate;
+
+      // He-Ne octave-folded base gives slow optical identity.
+      const laserEnv =
+        0.65 + 0.35 * Math.sin(2 * Math.PI * heNeBase * t);
+
+      // Holographic carrier gives whole-image identity.
+      const holoEnv =
+        0.65 + 0.35 * Math.sin(2 * Math.PI * carrier * t * 0.01);
+
+      // Spin modulation depth controls vibrato strength.
+      const vibrato =
+        depth * 0.015 * Math.sin(2 * Math.PI * carrier * t * 0.02);
+
+      const sig =
+        Math.sin(2 * Math.PI * hz * (1 + vibrato) * t + phase0) *
+        amp *
+        laserEnv *
+        holoEnv;
+
+      L[s] += sig * leftGain;
+      R[s] += sig * rightGain;
+    }
+
+    if (i % 4 === 3) {
+      onProgress?.((i + 1) / bins.length);
+      await yieldToUI();
+    }
+  }
+
+  normalizeStereo(L, R);
+
+  const stereo = new Float32Array(totalSamples * 2);
+  for (let i = 0; i < totalSamples; i++) {
+    stereo[i * 2] = L[i];
+    stereo[i * 2 + 1] = R[i];
+  }
+
+  return stereo;
 }
 
 // ─── ENGINE 1: GARIAEV WAVE GENETICS v2 (chunked async) ──────────────────────
@@ -729,12 +816,12 @@ export async function synthesizeFromPixelsAsync(
   const totalSamples = Math.floor(sampleRate * durationSeconds);
 
   // Pre-compute spinor spectrum on first call (cache in options if needed)
-  if (!options.spinorFrequencies) {
-    options.spinorFrequencies = extractSpinorFrequencies(pixels, width, height);
-    options.holographicFrequency = computeHolographicFrequency(pixels);
-    options.spinCoherence = computeSpinCoherence(pixels);
+  if (!options.spinorSpectrum) {
+    options.spinorSpectrum = analyzeSpinorSpectrum(pixels, width, height);
   }
   switch (mode) {
+    case "VIRTUAL_SPINOR":
+      return virtualSpinor(pixels, width, height, totalSamples, sampleRate, options, onProgress);
     case "WAVE_GENETICS":
       return waveGenetics(pixels, width, height, totalSamples, sampleRate, onProgress);
     case "SPECTRAL":
@@ -748,7 +835,7 @@ export async function synthesizeFromPixelsAsync(
     case "SIMULTANEOUS":
       return simultaneous(pixels, width, height, totalSamples, sampleRate, carrierFrequencies, onProgress);
     default:
-      return waveGenetics(pixels, width, height, totalSamples, sampleRate, onProgress);
+      return virtualSpinor(pixels, width, height, totalSamples, sampleRate, options, onProgress);
   }
 }
 
