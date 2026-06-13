@@ -442,7 +442,11 @@ async function spectral(
 
     for (let row = midRow; row < height; row++) {
       const ri  = row - midRow;
-      const px  = pixels[row * width + col];
+      const dx = col - centerX;
+      const dy = row - centerY;
+      const dist = Math.sqrt(dx * dx + dy * dy) / maxDist;
+      const fieldCol = Math.floor(dist * width) % width;
+      const px  = pixels[row * width + fieldCol];
       const hz  = pixelToHz(row, col, height, width, 80, 8000);
       const dt  = hz / sampleRate;
 
