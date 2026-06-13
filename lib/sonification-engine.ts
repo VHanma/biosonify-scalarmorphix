@@ -89,8 +89,8 @@ const BIN_HIGH_HZ = 2000; // bit = 1
 const BIN_LOW_HZ  = 200;  // bit = 0
 
 // Chunked async: process this many columns per async tick to keep UI responsive
-// 8 cols × 128 rows × 44100 × 30 s ≈ ~4M ops per tick — fast but non-blocking
-const COLS_PER_CHUNK = 8;
+// 32 cols × 128 rows × 44100 × 30 s ≈ ~16M ops per tick — 4× faster biofield load
+const COLS_PER_CHUNK = 32;
 
 // ─── Pixel math ───────────────────────────────────────────────────────────────
 
@@ -398,13 +398,21 @@ async function spectral(
   const phaseAccL = new Float64Array(midRow);
   const phaseAccR = new Float64Array(height - midRow);
 
+  const centerX = width / 2;
+  const centerY = height / 2;
+  const maxDist = Math.sqrt(centerX * centerX + centerY * centerY);
+
   for (let col = 0; col < width; col++) {
     const s0 = Math.floor(col * samplesPerCol);
     const s1 = Math.floor((col + 1) * samplesPerCol);
     const n  = s1 - s0;
 
     for (let row = 0; row < midRow; row++) {
-      const px = pixels[row * width + col];
+      const dx = col - centerX;
+      const dy = row - centerY;
+      const dist = Math.sqrt(dx * dx + dy * dy) / maxDist;
+      const fieldCol = Math.floor(dist * width) % width;
+      const px = pixels[row * width + fieldCol];
       const hz = pixelToHz(row, col, height, width, 80, 8000);
       const dt = hz / sampleRate;
 

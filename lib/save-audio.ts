@@ -37,11 +37,13 @@ export type SaveProgressCallback = (progress: number) => void;
 // ─── Tone generation ──────────────────────────────────────────────────────────
 
 /** Generate a pure sine tone for a frequency entry. Sub-20 Hz uses AM modulation. */
-function generateToneSamples(entry: FrequencyEntry, durationSeconds: number): Float32Array {
+function generateToneSamples(entry: FrequencyEntry, durationSeconds: number, spinorFreqs?: number[]): Float32Array {
   const total = Math.round(SAMPLE_RATE * durationSeconds);
   const samples = new Float32Array(total);
-  const audibleHz = entry.hz < 20 ? 200 : Math.min(entry.hz, 14000);
-  const modHz = entry.hz < 20 ? entry.hz : 0;
+  // Use spinor frequency if available (image-specific), else fall back to entry.hz
+  const baseHz = spinorFreqs && spinorFreqs.length > 0 ? spinorFreqs[0] : entry.hz;
+  const audibleHz = baseHz < 20 ? 200 : Math.min(baseHz, 14000);
+  const modHz = baseHz < 20 ? baseHz : 0;
   const fadeSamples = Math.min(Math.round(SAMPLE_RATE * 0.5), Math.round(total * 0.1));
 
   for (let i = 0; i < total; i++) {
@@ -260,6 +262,7 @@ export async function saveStackedOutput(
   enabledEntries: FrequencyEntry[],
   durationSeconds: number,
   onProgress?: SaveProgressCallback,
+  spinorFreqs?: number[],
 ): Promise<void> {
   onProgress?.(0.1);
   await yieldToUI();
@@ -267,7 +270,7 @@ export async function saveStackedOutput(
   const imageTrack = decodeWavBufferToSamples(wavBuffer);
 
   const toneTracks = enabledEntries.map((e) => {
-    const raw = generateToneSamples(e, durationSeconds);
+    const raw = generateToneSamples(e, durationSeconds, spinorFreqs);
     for (let i = 0; i < raw.length; i++) raw[i] *= 0.5;
     return raw;
   });
