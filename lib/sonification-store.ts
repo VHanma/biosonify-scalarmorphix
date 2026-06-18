@@ -28,6 +28,8 @@ export interface SonificationState {
   /** file:// URI on native, data: URI on web — used for audio playback */
   audioUri: string | null;
   waveformBars: number[];
+  /** Image-specific spinor frequencies for stacked save */
+  spinorFreqs: number[];
   recentImages: { uri: string; timestamp: number }[];
 }
 
@@ -45,6 +47,7 @@ const initialState: SonificationState = {
   wavBuffer: null,
   audioUri: null,
   waveformBars: [],
+  spinorFreqs: [],
   recentImages: [],
 };
 
@@ -57,7 +60,7 @@ type Action =
   | { type: 'TOGGLE_FREQUENCY'; id: string }
   | { type: 'SET_PLAYING'; playing: boolean }
   | { type: 'SET_PROCESSING'; processing: boolean }
-  | { type: 'SET_AUDIO'; wavBuffer: ArrayBuffer; audioUri: string; waveformBars: number[] }
+  | { type: 'SET_AUDIO'; wavBuffer: ArrayBuffer; audioUri: string; waveformBars: number[]; spinorFreqs?: number[] }
   | { type: 'CLEAR_AUDIO' }
   | { type: 'ADD_RECENT'; uri: string }
   | { type: 'LOAD_PERSISTED'; state: Partial<SonificationState> };
@@ -95,10 +98,11 @@ function reducer(state: SonificationState, action: Action): SonificationState {
         wavBuffer: action.wavBuffer,
         audioUri: action.audioUri,
         waveformBars: action.waveformBars,
+        spinorFreqs: action.spinorFreqs || [],
         isProcessing: false,
       };
     case 'CLEAR_AUDIO':
-      return { ...state, wavBuffer: null, audioUri: null, waveformBars: [], isPlaying: false };
+      return { ...state, wavBuffer: null, audioUri: null, waveformBars: [], spinorFreqs: [], isPlaying: false };
     case 'ADD_RECENT': {
       const existing = state.recentImages.filter((r) => r.uri !== action.uri);
       const updated = [{ uri: action.uri, timestamp: Date.now() }, ...existing].slice(0, 5);

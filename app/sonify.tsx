@@ -66,6 +66,27 @@ import { applyScalarEncoding } from "@/lib/scalar-encoder";
 const { width: SCREEN_W } = Dimensions.get("window");
 const BAR_COUNT = 50;
 
+// Compute spectral centroid from waveform bars (simplified: weighted average of bar indices)
+function computeSpectralCentroid(bars: number[]): number {
+  if (bars.length === 0) return 0;
+  let sum = 0, weightSum = 0;
+  for (let i = 0; i < bars.length; i++) {
+    sum += i * bars[i];
+    weightSum += bars[i];
+  }
+  return weightSum > 0 ? (sum / weightSum) * 100 : 0; // Scale to Hz-like range
+}
+
+// Compute RMS energy from waveform bars
+function computeRMS(bars: number[]): number {
+  if (bars.length === 0) return 0;
+  let sum = 0;
+  for (let i = 0; i < bars.length; i++) {
+    sum += bars[i] * bars[i];
+  }
+  return Math.sqrt(sum / bars.length);
+}
+
 const AFFIRMATION_KEY_PREFIX = "@biosonify_affirm_";
 
 const MODE_LABELS: Record<SonificationMode, string> = {
@@ -230,17 +251,20 @@ export default function SonifyScreen() {
       const { pixels, width, height } = await extractPixels(state.imageUri);
       const enabledHz = getEnabledHz();
       setSynthProgress(0);
+      const opts = {
+        mode: state.mode,
+        durationSeconds: state.durationSeconds,
+        carrierFrequencies: enabledHz,
+        sampleRate: 44100,
+      };
       const samples = await synthesizeFromPixelsAsync(
-        pixels, width, height,
-        {
-          mode: state.mode,
-          durationSeconds: state.durationSeconds,
-          carrierFrequencies: enabledHz,
-          sampleRate: 44100,
-        },
+        pixels, width, height, opts,
         (p) => setSynthProgress(Math.round(p * 100)),
       );
       setSynthProgress(100);
+      const spinorFreqs = (opts as any).spinorSpectrum
+        ? (opts as any).spinorSpectrum.bins.slice(0, 10).map((b: any) => b.hz)
+        : [];
 
       // Apply HRTF brain-region spatialization
       const hrtfApplied =
@@ -254,7 +278,7 @@ export default function SonifyScreen() {
       const wavBuffer = encodeWav(encoded, 44100);
       const audioUri = await writeWavToFile(wavBuffer);
       const bars = extractWaveformBars(encoded, BAR_COUNT);
-      dispatch({ type: "SET_AUDIO", wavBuffer, audioUri, waveformBars: bars });
+      dispatch({ type: "SET_AUDIO", wavBuffer, audioUri, waveformBars: bars, spinorFreqs });
     } catch (e) {
       dispatch({ type: "SET_PROCESSING", processing: false });
       setSynthProgress(0);
@@ -409,6 +433,7 @@ export default function SonifyScreen() {
         enabled,
         state.durationSeconds,
         (p) => setSaveProgress(Math.round(p * 100)),
+        state.spinorFreqs,
       );
     } catch (e) {
       Alert.alert("Save failed", String(e));
@@ -545,6 +570,33 @@ export default function SonifyScreen() {
             ? "Waveform — every bar represents real image data"
             : "Waveform will appear after synthesis"}
         </Text>
+
+        {/* ── Audio Fingerprint ────────────────────────────────────────────── */}
+        {state.waveformBars.length > 0 && (
+          <View style={styles.fingerprintContainer}>
+            <Text style={styles.fingerprintLabel}>Audio Fingerprint</Text>
+            <View style={styles.fingerprintRow}>
+              <View style={styles.fingerprintMetric}>
+                <Text style={styles.fingerprintValue}>
+                  {computeSpectralCentroid(state.waveformBars).toFixed(0)} Hz
+                </Text>
+                <Text style={styles.fingerprintMetricName}>Centroid</Text>
+              </View>
+              <View style={styles.fingerprintMetric}>
+                <Text style={styles.fingerprintValue}>
+                  {computeRMS(state.waveformBars).toFixed(3)}
+                </Text>
+                <Text style={styles.fingerprintMetricName}>RMS Energy</Text>
+              </View>
+              <View style={styles.fingerprintMetric}>
+                <Text style={styles.fingerprintValue}>
+                  {state.spinorFreqs.length > 0 ? state.spinorFreqs[0].toFixed(0) : "—"} Hz
+                </Text>
+                <Text style={styles.fingerprintMetricName}>Spinor Base</Text>
+              </View>
+            </View>
+          </View>
+        )}
 
         {/* ── Mode selector ────────────────────────────────────────────────── */}
         <View style={styles.modeRow}>
@@ -1333,5 +1385,44 @@ const styles = StyleSheet.create({
     height: 4,
     backgroundColor: "#2ECC9A",
     borderRadius: 2,
+  },
+  fingerprintContainer: {
+    marginHorizontal: 16,
+    marginBottom: 16,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    backgroundColor: "#0D1117",
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: "#30363D",
+  },
+  fingerprintLabel: {
+    fontSize: 11,
+    fontWeight: "600",
+    color: "#7D8590",
+    marginBottom: 8,
+    textTransform: "uppercase",
+    letterSpacing: 0.5,
+  },
+  fingerprintRow: {
+    flexDirection: "row",
+    justifyContent: "space-around",
+    alignItems: "center",
+  },
+  fingerprintMetric: {
+    alignItems: "center",
+    flex: 1,
+  },
+  fingerprintValue: {
+    fontSize: 13,
+    fontWeight: "700",
+    color: "#E6EDF3",
+    marginBottom: 2,
+  },
+  fingerprintMetricName: {
+    fontSize: 9,
+    color: "#7D8590",
+    textTransform: "uppercase",
+    letterSpacing: 0.3,
   },
 });

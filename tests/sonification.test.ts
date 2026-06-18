@@ -279,3 +279,46 @@ describe("FREQUENCY_LIBRARY", () => {
     expect(unique.size).toBe(ids.length);
   });
 });
+
+describe("BIOFIELD distinctness", () => {
+  it("produces distinct output for different images", async () => {
+    const opts: SonificationOptions = {
+      mode: "BIOFIELD",
+      durationSeconds: 1,
+      carrierFrequencies: [40, 80, 160, 320],
+      sampleRate: 22050,
+    };
+
+    // Image 1: red gradient
+    const img1 = Array.from({ length: 16 * 16 }, (_, i) => ({
+      r: (i % 256),
+      g: 0,
+      b: 0,
+      a: 255,
+    }));
+
+    // Image 2: blue gradient
+    const img2 = Array.from({ length: 16 * 16 }, (_, i) => ({
+      r: 0,
+      g: 0,
+      b: (i % 256),
+      a: 255,
+    }));
+
+    const audio1 = await synthesizeFromPixelsAsync(img1, 16, 16, opts);
+    const audio2 = await synthesizeFromPixelsAsync(img2, 16, 16, opts);
+
+    // Compute RMS energy for each
+    let rms1 = 0, rms2 = 0;
+    for (let i = 0; i < audio1.length; i++) {
+      rms1 += audio1[i] * audio1[i];
+      rms2 += audio2[i] * audio2[i];
+    }
+    rms1 = Math.sqrt(rms1 / audio1.length);
+    rms2 = Math.sqrt(rms2 / audio2.length);
+
+    // Different images should produce different RMS energy (within 10% tolerance for variance)
+    const rmsDiff = Math.abs(rms1 - rms2) / Math.max(rms1, rms2);
+    expect(rmsDiff).toBeGreaterThan(0.05); // At least 5% difference
+  });
+});
