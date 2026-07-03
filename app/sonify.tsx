@@ -97,6 +97,7 @@ const MODE_LABELS: Record<SonificationMode, string> = {
   CYMATICS: "Cymatics",
   BINARY: "Binary",
   SIMULTANEOUS: "All Modes",
+    UNIFIED_SCALAR: "Unified Scalar Codec v19",
 };
 
 const MODE_COLORS: Record<SonificationMode, string> = {
@@ -107,6 +108,7 @@ const MODE_COLORS: Record<SonificationMode, string> = {
   CYMATICS: "#E040FB",
   BINARY: "#00E5FF",
   SIMULTANEOUS: "#9C27B0",
+  UNIFIED_SCALAR: "#FF1493",
 };
 
 const MODE_DESCRIPTIONS: Record<SonificationMode, string> = {
@@ -124,6 +126,8 @@ const MODE_DESCRIPTIONS: Record<SonificationMode, string> = {
     "Every pixel's R/G/B bytes converted to binary bit-stream · 1→2000 Hz · 0→200 Hz · brightness→amplitude",
   SIMULTANEOUS:
     "All six modes (Virtual Spinor, Spectral, Wave Genetics, Biofield, Cymatics, Binary) synthesized and mixed simultaneously",
+  UNIFIED_SCALAR:
+    "Rife trait resonance + Levin bioelectric morphogenesis + Hermetic correspondence + Gariaev Fire Letters + PCM source-locking",
 };
 
 const BRAIN_REGION_LIST: { key: BrainRegion; label: string }[] = Object.entries(

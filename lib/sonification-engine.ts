@@ -68,6 +68,9 @@ import {
   type MorphogeneticWave,
 } from "./morphogenetic-waves";
 
+import { synthesizeUnifiedScalarCodec } from "./unified-scalar-codec-v19";
+import { encodeSourceLock, embedIntoAudio } from "./pcm-source-lock-v2";
+
 export type SonificationMode =
   | "VIRTUAL_SPINOR"
   | "WAVE_GENETICS"
@@ -75,7 +78,8 @@ export type SonificationMode =
   | "BIOFIELD"
   | "CYMATICS"
   | "BINARY"
-  | "SIMULTANEOUS";
+  | "SIMULTANEOUS"
+  | "UNIFIED_SCALAR";
 
 export interface PixelData {
   r: number; // 0–255
@@ -506,7 +510,7 @@ async function spectral(
       phaseAccR[ri] = (phaseAccR[ri] + n * dt) % 1;
     }
 
-    if (col % COLS_PER_CHUNK === COLS_PER_CHUNK - 1) {
+    if (col % Math.max(1, Math.floor(width / 4)) === Math.max(1, Math.floor(width / 4)) - 1 || col === width - 1) {
       onProgress?.((col + 1) / width);
       await yieldToUI();
     }
