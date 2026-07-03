@@ -41,6 +41,32 @@ import {
   HENE_AUDIO_BASE_HZ,
   type SpinorSpectrum,
 } from "./spinor-spectrum";
+import {
+  imageToFireLetters,
+  applyMerkabRatioEncoding,
+  generatePhaseConjugatePair,
+  getFireLetterInfo,
+  type FireLetterPattern,
+} from "./fire-letters";
+import {
+  generateNaturalMerkabField,
+  applyMerkabFieldToSamples,
+  createScalarStandingWave,
+  getMerkabFieldInfo,
+  type MerkabField,
+} from "./merkaba-engine";
+import {
+  getHarmonicUniverseMap,
+  getSynthesisModeMapping,
+  getSynthesisModeFrequencies,
+  getDnaStrandActivation,
+} from "./harmonic-universe";
+import {
+  generateMorphogeneticWave,
+  renderMorphogeneticWaveToAudio,
+  getMorphogeneticWaveInfo,
+  type MorphogeneticWave,
+} from "./morphogenetic-waves";
 
 export type SonificationMode =
   | "VIRTUAL_SPINOR"
@@ -64,6 +90,12 @@ export interface SonificationOptions {
   carrierFrequencies: number[];
   sampleRate: number;
   spinorSpectrum?: SpinorSpectrum; // Pre-computed spinor spectrum (optional cache)
+  fireLetterPattern?: FireLetterPattern; // Pre-computed Fire Letters (optional cache)
+  merkabField?: MerkabField; // Pre-computed Merkaba field (optional cache)
+  morphogeneticWave?: MorphogeneticWave; // Pre-computed morphogenetic wave (optional cache)
+  useScalarField?: boolean; // Enable full scalar field encoding (default: true)
+  useMerkabRatios?: boolean; // Enable Merkaba ratio encoding (default: true)
+  useMorphogeneticWaves?: boolean; // Enable morphogenetic wave synthesis (default: true)
 }
 
 /** Called with progress 0.0–1.0 during async synthesis */
@@ -831,6 +863,29 @@ export async function synthesizeFromPixelsAsync(
   if (!options.spinorSpectrum) {
     options.spinorSpectrum = analyzeSpinorSpectrum(pixels, width, height);
   }
+
+  // Pre-compute Fire Letters if scalar field encoding is enabled
+  if ((options.useScalarField ?? true) && !options.fireLetterPattern) {
+    const pixelData = new Uint8ClampedArray(width * height * 4);
+    for (let i = 0; i < pixels.length; i++) {
+      const px = pixels[i];
+      pixelData[i * 4] = px.r;
+      pixelData[i * 4 + 1] = px.g;
+      pixelData[i * 4 + 2] = px.b;
+      pixelData[i * 4 + 3] = px.a;
+    }
+    options.fireLetterPattern = imageToFireLetters(pixelData, width, height);
+    if (options.useMerkabRatios ?? true) {
+      options.fireLetterPattern = applyMerkabRatioEncoding(options.fireLetterPattern);
+    }
+  }
+
+  // Pre-compute Merkaba field if not already cached
+  if ((options.useMerkabRatios ?? true) && !options.merkabField) {
+    const baseFreq = options.carrierFrequencies?.[0] ?? 528;
+    options.merkabField = generateNaturalMerkabField(baseFreq);
+  }
+
   switch (mode) {
     case "VIRTUAL_SPINOR":
       return virtualSpinor(pixels, width, height, totalSamples, sampleRate, options, onProgress);
