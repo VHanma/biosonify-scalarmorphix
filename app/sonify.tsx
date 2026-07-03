@@ -598,6 +598,33 @@ export default function SonifyScreen() {
           </View>
         )}
 
+        {/* ── Fire Letter Grid (144 Information Signature) ──────────────────── */}
+        {state.fireLetterPattern && (
+          <View style={styles.fireLetterContainer}>
+            <Text style={styles.fireLetterLabel}>Fire Letter Signature</Text>
+            <View style={styles.fireLetterGrid}>
+              {Array.from({ length: 144 }).map((_, idx) => {
+                const dim = Math.floor(idx / 12);
+                const letter = idx % 12;
+                const letterValue = state.fireLetterPattern?.sequences[dim]?.letters[letter] ?? 0;
+                const cellColor = `rgba(46, 204, 154, ${letterValue / 255})`;
+                return (
+                  <View
+                    key={idx}
+                    style={[
+                      styles.fireLetterCell,
+                      { backgroundColor: cellColor },
+                    ]}
+                  />
+                );
+              })}
+            </View>
+            <Text style={styles.fireLetterHint}>
+              12 dimensions × 12 letters. Brightness = information density.
+            </Text>
+          </View>
+        )}
+
         {/* ── Mode selector ────────────────────────────────────────────────── */}
         <View style={styles.modeRow}>
           {(["SPECTRAL", "WAVE_GENETICS", "BIOFIELD", "CYMATICS", "BINARY", "SIMULTANEOUS"] as SonificationMode[]).map((m) => (
@@ -1424,5 +1451,38 @@ const styles = StyleSheet.create({
     color: "#7D8590",
     textTransform: "uppercase",
     letterSpacing: 0.3,
+  },
+  fireLetterContainer: {
+    paddingHorizontal: 16,
+    marginVertical: 12,
+    backgroundColor: "#0D1117",
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: "#30363D",
+    padding: 12,
+  },
+  fireLetterLabel: {
+    fontSize: 12,
+    fontWeight: "700",
+    color: "#2ECC9A",
+    marginBottom: 8,
+  },
+  fireLetterGrid: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 4,
+    marginBottom: 8,
+  },
+  fireLetterCell: {
+    width: "25%",
+    aspectRatio: 1,
+    borderRadius: 4,
+    borderWidth: 0.5,
+    borderColor: "#30363D",
+  },
+  fireLetterHint: {
+    fontSize: 9,
+    color: "#7D8590",
+    lineHeight: 12,
   },
 });
