@@ -351,3 +351,84 @@
 - [x] Verify UNIFIED_SCALAR mode is selectable in UI
 - [x] Verify progress callbacks fire for small images
 - [x] Verify all modes still work independently
+
+## v20: UNIFIED MAXIMUM-POTENCY REBUILD
+
+### Core Architecture Change
+- [ ] Remove multi-layer separate mode selection — ALL layers stack into ONE output automatically
+- [ ] Single unified encode button: pick file/image → get one audio with everything embedded
+- [ ] Raw byte-for-byte file embedding (no compression, no lossy transforms)
+- [ ] Full file recovery from audio (decode audio back to exact original file)
+- [ ] Support ANY file type: images, PDFs, documents, text, binary — not just images
+
+### Raw Data PCM Archive Encoder
+- [ ] Implement exact-source-data WAV: 48kHz mono PCM_16, one byte per sample
+- [ ] Mapping: sample = (byte - 128) × 256 (reversible, lossless)
+- [ ] Header: magic + version + asset_count + payload_length + SHA-256 + CRC32 + cell_size
+- [ ] Footer: magic + CRC32
+- [ ] Transport cells: 8192 bytes per cell
+- [ ] Internal verification: decode after encode, byte-for-byte match
+- [ ] No normalization, no limiting, no EQ, no compression, no resampling, no dither
+
+### V1 Native Engine (Gariaev Horizontal/Vertical Raster)
+- [ ] 24,000 Hz stereo PCM_24
+- [ ] BOX pooling: horizontal 256×H, vertical W×256, global 256×256
+- [ ] 1600 samples per scanline, 15 scanlines/sec
+- [ ] Serpentine scan (alternating direction)
+- [ ] Landmark tones: 396, 417, 528, 639, 741, 852 Hz
+- [ ] Horizontal pass: all H rows
+- [ ] Vertical pass: all W columns with recurrence (13/37/79 blocks)
+- [ ] 4-second global reference + 12-second Fourier closure
+- [ ] History limit: 96 mono blocks
+
+### V2 Native Engine (Phase-Conjugate Scalar Field)
+- [ ] 65,536 Hz stereo, linearized sRGB, float64 phase accumulation
+- [ ] Red visual proxy: r633 = 0.82R + 0.16G + 0.02B (632.8nm wavelength)
+- [ ] Fresnel planes: [0.008, 0.021, 0.044]m with weights [0.50, 0.30, 0.20]
+- [ ] Complementary modes IA + IB = 1 (invariant)
+- [ ] Phase-conjugate stereo encoding
+- [ ] FPU recurrence: 8 sites, alpha=0.35, 200000 steps
+- [ ] 48-second Fourier-memory closure with 36 peaks
+- [ ] Every pixel used exactly once in serpentine order
+
+### 15-Band Phase Field (Scalar Architecture)
+- [ ] 144-node codebook from image quantization
+- [ ] 15 bands geometrically spaced 72 Hz to 6800 Hz
+- [ ] 34:21 paired phase-rate relation (Merkaba ratio)
+- [ ] 45-degree phase offset between bands
+- [ ] Phase-conjugate stereo: left = sin(phase_plus + seed), right = sin(-phase_minus - seed)
+
+### Byte-Symbol Pipeline (DNA-style encoding)
+- [ ] Raw bytes → 4 symbols per byte (00=A, 01=C, 10=G, 11=T)
+- [ ] Forward stream + reverse-complement stream
+- [ ] Codon grouping (3-symbol windows)
+- [ ] 64×64 codon-transition matrix
+- [ ] Palindrome detection, self-loops, rare transitions
+
+### Unified Stacked Master (ONE OUTPUT)
+- [ ] All layers automatically mixed into single stereo output
+- [ ] V1 raster + V2 phase-conjugate + 15-band field + byte-symbols + raw data
+- [ ] Source visuals dominant in the mix
+- [ ] Master limiting: clip(0.95 × tanh(1.10 × signal), -0.98, 0.98)
+- [ ] No user interaction needed — automatic stacking
+
+### File/Document Ingest
+- [ ] Add document picker (expo-document-picker) for any file type
+- [ ] Preserve exact raw bytes of input file
+- [ ] For images: process pixels as visual source
+- [ ] For PDFs/docs: render pages as images + extract text
+- [ ] For text: parse UTF-8 bytes + create visual rendering
+- [ ] All representations share linked source-cell identities
+
+### Speed Optimization
+- [ ] Pre-computed sin/cos lookup tables (65536 entries)
+- [ ] Batch processing with typed arrays (no per-sample function calls)
+- [ ] Streaming synthesis (process in 4096-sample blocks)
+- [ ] Eliminate unnecessary object allocations in hot loops
+- [ ] Target: 3-5x faster than current implementation
+
+### Recurrence System
+- [ ] Fast drive: edge density, byte entropy, code ID, micro texture
+- [ ] Medium drive: luminance, red emphasis, codon transitions, orientation
+- [ ] Slow drive: bright fraction, macro symmetry, source-cell progression
+- [ ] Chaotic maps: tanh(0.68×prev + 0.42×sin(2.8×prev) + 0.56×drive - 0.38)
