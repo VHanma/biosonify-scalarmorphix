@@ -3,10 +3,19 @@ name: Build BioSonify V27 Native APK
 on:
   push:
     branches:
+      - main
       - agent/biosonify-v27-build-safe
+    paths:
+      - build_inputs/BioSonify_COMPLETE_V27_ANDROID_PROJECT.zip.b64
+      - build_inputs/BioSonify-V27-TRIGGER.txt
+      - .github/workflows/build-biosonify-v27-native.yml
   pull_request:
     branches:
       - main
+    paths:
+      - build_inputs/BioSonify_COMPLETE_V27_ANDROID_PROJECT.zip.b64
+      - build_inputs/BioSonify-V27-TRIGGER.txt
+      - .github/workflows/build-biosonify-v27-native.yml
   workflow_dispatch:
 
 permissions:
