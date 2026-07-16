@@ -1,0 +1,2 @@
+Compile the uploaded BioSonify V27 native Android project.
+Build request: 2026-07-16.
