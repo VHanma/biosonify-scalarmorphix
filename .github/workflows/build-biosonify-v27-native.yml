@@ -1,25 +1,6 @@
-name: Build BioSonify Fixed Android APK
+name: Build and Smoke-Test BioSonify Scalar APK
 
 on:
-  push:
-    branches:
-      - main
-    paths:
-      - app/**
-      - assets/**
-      - components/**
-      - constants/**
-      - hooks/**
-      - lib/**
-      - scripts/**
-      - app.config.ts
-      - babel.config.js
-      - metro.config.js
-      - package.json
-      - pnpm-lock.yaml
-      - tsconfig.json
-      - build_inputs/BioSonify-FIXED-TRIGGER.txt
-      - .github/workflows/build-biosonify-v27-native.yml
   pull_request:
     branches:
       - main
@@ -37,7 +18,6 @@ on:
       - package.json
       - pnpm-lock.yaml
       - tsconfig.json
-      - build_inputs/BioSonify-FIXED-TRIGGER.txt
       - .github/workflows/build-biosonify-v27-native.yml
   workflow_dispatch:
 
@@ -45,16 +25,17 @@ permissions:
   contents: read
 
 jobs:
-  build-apk:
+  build-and-smoke-test:
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 60
     env:
       CI: '1'
       EXPO_NO_TELEMETRY: '1'
       NODE_OPTIONS: '--max-old-space-size=6144'
+      APP_PACKAGE: com.vhanma.biosonify.scalarparallax
 
     steps:
-      - name: Check out real BioSonify source
+      - name: Check out BioSonify Scalar source
         uses: actions/checkout@v4
 
       - name: Set up Node 22
@@ -83,23 +64,70 @@ jobs:
       - name: Generate native Android project
         run: pnpm exec expo prebuild --platform android --clean
 
-      - name: Build installable debug APK
+      - name: Confirm side-by-side package identity
+        run: |
+          grep -R "applicationId.*${APP_PACKAGE}" android/app/build.gradle
+          grep -R "namespace.*${APP_PACKAGE}" android/app/build.gradle
+
+      - name: Build standalone ARM release APK
         working-directory: android
         run: |
           chmod +x gradlew
-          ./gradlew :app:assembleDebug --no-daemon --stacktrace
+          ./gradlew :app:assembleRelease --no-daemon --stacktrace
 
-      - name: Name and hash finished APK
+      - name: Preserve phone APK and verify manifest
         run: |
-          cp android/app/build/outputs/apk/debug/app-debug.apk BioSonify-FIXED-OneClick.apk
-          sha256sum BioSonify-FIXED-OneClick.apk > BioSonify-FIXED-OneClick-SHA256.txt
+          cp android/app/build/outputs/apk/release/app-release.apk BioSonify-Scalar-SideBySide-OneClick.apk
+          APKSIGNER="$(find "$ANDROID_HOME/build-tools" -name apksigner -type f | sort -V | tail -1)"
+          AAPT="$(find "$ANDROID_HOME/build-tools" -name aapt -type f | sort -V | tail -1)"
+          "$APKSIGNER" verify --verbose --print-certs BioSonify-Scalar-SideBySide-OneClick.apk
+          "$AAPT" dump badging BioSonify-Scalar-SideBySide-OneClick.apk | tee apk-badging.txt
+          grep "package: name='${APP_PACKAGE}'" apk-badging.txt
+          grep "application-label:'BioSonify Scalar'" apk-badging.txt
+          sha256sum BioSonify-Scalar-SideBySide-OneClick.apk > BioSonify-Scalar-SideBySide-OneClick-SHA256.txt
 
-      - name: Upload installable fixed APK
+      - name: Build x86_64 release APK for emulator test
+        run: |
+          sed -i 's/^reactNativeArchitectures=.*/reactNativeArchitectures=x86_64/' android/gradle.properties
+          cd android
+          ./gradlew clean :app:assembleRelease --no-daemon --stacktrace
+
+      - name: Boot Android and launch exact release build
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 35
+          target: google_apis
+          arch: x86_64
+          profile: pixel_6
+          disable-animations: true
+          script: |
+            set -euo pipefail
+            adb install -r android/app/build/outputs/apk/release/app-release.apk
+            adb logcat -c
+            adb shell monkey -p "$APP_PACKAGE" -c android.intent.category.LAUNCHER 1
+            sleep 15
+            PID="$(adb shell pidof "$APP_PACKAGE" | tr -d '\r')"
+            test -n "$PID"
+            adb shell dumpsys activity activities | grep -E "mResumedActivity|topResumedActivity" | grep "$APP_PACKAGE"
+            adb logcat -d -v threadtime > biosonify-scalar-emulator-log.txt
+            if grep -E "FATAL EXCEPTION|Unable to start activity|Process: ${APP_PACKAGE}" biosonify-scalar-emulator-log.txt; then
+              echo "Fatal Android launch error detected"
+              exit 1
+            fi
+            if grep -E "ReactNativeJS:.*(TypeError|ReferenceError|Invariant Violation|Error:)" biosonify-scalar-emulator-log.txt; then
+              echo "Fatal React Native JavaScript error detected"
+              exit 1
+            fi
+            echo "Launch smoke test passed with process $PID"
+
+      - name: Upload verified side-by-side APK
         uses: actions/upload-artifact@v4
         with:
-          name: BioSonify-FIXED-OneClick
+          name: BioSonify-Scalar-SideBySide-Verified
           path: |
-            BioSonify-FIXED-OneClick.apk
-            BioSonify-FIXED-OneClick-SHA256.txt
+            BioSonify-Scalar-SideBySide-OneClick.apk
+            BioSonify-Scalar-SideBySide-OneClick-SHA256.txt
+            apk-badging.txt
+            biosonify-scalar-emulator-log.txt
           if-no-files-found: error
           retention-days: 30
