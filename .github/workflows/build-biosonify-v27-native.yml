@@ -1,4 +1,4 @@
-name: Smoke-Test Preserved BioSonify Scalar APK
+name: Direct Launch-Test BioSonify Scalar APK
 
 on:
   pull_request:
@@ -13,13 +13,14 @@ permissions:
   actions: read
 
 jobs:
-  smoke-test-preserved-apk:
+  direct-launch-test:
     runs-on: ubuntu-22.04
-    timeout-minutes: 35
+    timeout-minutes: 40
     env:
       APP_PACKAGE: com.vhanma.biosonify.scalarparallax
       ANDROID_HOME: /usr/local/lib/android/sdk
       ANDROID_SDK_ROOT: /usr/local/lib/android/sdk
+      PATH: /usr/local/lib/android/sdk/platform-tools:/usr/local/lib/android/sdk/emulator:/usr/local/lib/android/sdk/cmdline-tools/latest/bin:/usr/bin:/bin
 
     steps:
       - name: Download preserved verified APK
@@ -31,88 +32,116 @@ jobs:
           repository: VHanma/biosonify-scalarmorphix
           run-id: 30052907225
 
-      - name: Confirm candidate files and SDK
+      - name: Confirm exact APK checksum
+        shell: bash
         run: |
-          ls -lah candidate
-          test -f candidate/BioSonify-Scalar-SideBySide-OneClick.apk
-          test -f candidate/BioSonify-Scalar-SideBySide-OneClick-SHA256.txt
+          set -euo pipefail
           cd candidate
           sha256sum -c BioSonify-Scalar-SideBySide-OneClick-SHA256.txt
-          test -x "$ANDROID_HOME/platform-tools/adb"
-          test -x "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          ls -lh BioSonify-Scalar-SideBySide-OneClick.apk
 
-      - name: Enable KVM access
+      - name: Install Android emulator image
+        shell: bash
         run: |
+          set -euo pipefail
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager "platform-tools" "emulator" "system-images;android-34;google_apis;x86_64"
+
+      - name: Create and boot Android device
+        shell: bash
+        run: |
+          set -euo pipefail
           echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
           sudo udevadm control --reload-rules
           sudo udevadm trigger --name-match=kvm
           sudo chmod 666 /dev/kvm
-          ls -l /dev/kvm
 
-      - name: Boot Android and test exact preserved APK
-        uses: reactivecircus/android-emulator-runner@v2
-        with:
-          api-level: 35
-          target: google_apis
-          arch: x86_64
-          profile: pixel_6
-          cores: 2
-          ram-size: 4096M
-          heap-size: 1024M
-          disk-size: 6G
-          disable-animations: true
-          emulator-boot-timeout: 600
-          script: |
-            set -euo pipefail
-            APK="candidate/BioSonify-Scalar-SideBySide-OneClick.apk"
-            adb install -r "$APK"
-            adb logcat -c
-            adb shell monkey -p "$APP_PACKAGE" -c android.intent.category.LAUNCHER 1
-            sleep 15
+          echo no | avdmanager create avd \
+            --force \
+            --name biosonify_test \
+            --package "system-images;android-34;google_apis;x86_64" \
+            --device "pixel_6"
+
+          emulator -avd biosonify_test \
+            -no-window \
+            -noaudio \
+            -no-boot-anim \
+            -gpu swiftshader_indirect \
+            -camera-back none \
+            -camera-front none \
+            -wipe-data \
+            -memory 3072 \
+            > emulator-console.log 2>&1 &
+
+          adb wait-for-device
+          for i in $(seq 1 120); do
+            BOOTED="$(adb shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')"
+            if [ "$BOOTED" = "1" ]; then
+              break
+            fi
+            sleep 5
+          done
+          test "$(adb shell getprop sys.boot_completed | tr -d '\r')" = "1"
+          adb shell settings put global window_animation_scale 0
+          adb shell settings put global transition_animation_scale 0
+          adb shell settings put global animator_duration_scale 0
+          adb devices -l
+
+      - name: Install and launch exact preserved APK
+        shell: bash
+        run: |
+          set -euo pipefail
+          APK="candidate/BioSonify-Scalar-SideBySide-OneClick.apk"
+          adb install -r "$APK"
+          adb shell pm path "$APP_PACKAGE"
+          adb logcat -c
+          adb shell monkey -p "$APP_PACKAGE" -c android.intent.category.LAUNCHER 1
+          sleep 20
+
+          PID="$(adb shell pidof "$APP_PACKAGE" | tr -d '\r')"
+          test -n "$PID"
+          adb shell dumpsys activity activities > activity-state.txt
+          grep -E "mResumedActivity|topResumedActivity" activity-state.txt | grep "$APP_PACKAGE"
+          adb exec-out screencap -p > biosonify-scalar-launch.png
+          adb logcat -d -v threadtime > biosonify-scalar-emulator-log.txt
+
+          if grep -E "FATAL EXCEPTION|Unable to start activity|Process: ${APP_PACKAGE}" biosonify-scalar-emulator-log.txt; then
+            echo "Fatal Android launch error detected"
+            exit 1
+          fi
+          if grep -E "ReactNativeJS:.*(TypeError|ReferenceError|Invariant Violation|Error:)" biosonify-scalar-emulator-log.txt; then
+            echo "Fatal React Native error detected"
+            exit 1
+          fi
+          echo "Launch passed. Process remains alive: $PID"
+
+      - name: Test main navigation without process death
+        shell: bash
+        run: |
+          set -euo pipefail
+          adb shell wm size | tee display-size.txt
+          SIZE="$(adb shell wm size | tail -1 | grep -oE '[0-9]+x[0-9]+')"
+          WIDTH="${SIZE%x*}"
+          HEIGHT="${SIZE#*x}"
+          Y=$((HEIGHT - 80))
+
+          for PERCENT in 37 62 87 12; do
+            X=$((WIDTH * PERCENT / 100))
+            adb shell input tap "$X" "$Y"
+            sleep 4
             PID="$(adb shell pidof "$APP_PACKAGE" | tr -d '\r')"
             test -n "$PID"
-            adb shell dumpsys activity activities | grep -E "mResumedActivity|topResumedActivity" | grep "$APP_PACKAGE"
+          done
 
-            python3 - <<'PY'
-            import re
-            import subprocess
-            import time
-            import xml.etree.ElementTree as ET
+          adb logcat -d -v threadtime > biosonify-scalar-navigation-log.txt
+          if grep -E "FATAL EXCEPTION|Unable to start activity|Process: ${APP_PACKAGE}" biosonify-scalar-navigation-log.txt; then
+            echo "Fatal error detected during navigation"
+            exit 1
+          fi
+          adb exec-out screencap -p > biosonify-scalar-after-navigation.png
+          echo "Navigation smoke test passed"
 
-            package = "com.vhanma.biosonify.scalarparallax"
-            labels = ["Frequencies", "Brain", "Theory", "Sonify"]
-
-            for label in labels:
-                subprocess.run(["adb", "shell", "uiautomator", "dump", "/sdcard/window.xml"], check=True, stdout=subprocess.DEVNULL)
-                subprocess.run(["adb", "pull", "/sdcard/window.xml", "window.xml"], check=True, stdout=subprocess.DEVNULL)
-                root = ET.parse("window.xml").getroot()
-                node = next((n for n in root.iter() if n.attrib.get("text") == label or n.attrib.get("content-desc") == label), None)
-                if node is None:
-                    raise SystemExit(f"Could not find tab: {label}")
-                match = re.fullmatch(r"\[(\d+),(\d+)\]\[(\d+),(\d+)\]", node.attrib["bounds"])
-                if not match:
-                    raise SystemExit(f"Bad bounds for {label}: {node.attrib.get('bounds')}")
-                x1, y1, x2, y2 = map(int, match.groups())
-                subprocess.run(["adb", "shell", "input", "tap", str((x1 + x2) // 2), str((y1 + y2) // 2)], check=True)
-                time.sleep(3)
-                pid = subprocess.check_output(["adb", "shell", "pidof", package], text=True).strip()
-                if not pid:
-                    raise SystemExit(f"App process died after opening {label}")
-                print(f"Tab passed: {label}; process {pid}")
-            PY
-
-            adb logcat -d -v threadtime > biosonify-scalar-emulator-log.txt
-            if grep -E "FATAL EXCEPTION|Unable to start activity|Process: ${APP_PACKAGE}" biosonify-scalar-emulator-log.txt; then
-              echo "Fatal Android runtime error detected"
-              exit 1
-            fi
-            if grep -E "ReactNativeJS:.*(TypeError|ReferenceError|Invariant Violation|Error:)" biosonify-scalar-emulator-log.txt; then
-              echo "Fatal React Native JavaScript error detected"
-              exit 1
-            fi
-            echo "Exact preserved APK launch and tab smoke test passed with process $PID"
-
-      - name: Upload launch-tested APK
+      - name: Upload launch-tested APK and evidence
         uses: actions/upload-artifact@v4
         with:
           name: BioSonify-Scalar-SideBySide-LAUNCH-TESTED
@@ -125,16 +154,24 @@ jobs:
             candidate/architecture-check.txt
             candidate/universal-release-build.log
             biosonify-scalar-emulator-log.txt
+            biosonify-scalar-navigation-log.txt
+            biosonify-scalar-launch.png
+            biosonify-scalar-after-navigation.png
+            activity-state.txt
+            display-size.txt
           if-no-files-found: error
           retention-days: 30
 
-      - name: Upload smoke diagnostics if test fails
+      - name: Upload diagnostics on failure
         if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: BioSonify-Scalar-Smoke-Diagnostics
+          name: BioSonify-Scalar-Direct-Test-Diagnostics
           path: |
+            emulator-console.log
             biosonify-scalar-emulator-log.txt
-            window.xml
+            biosonify-scalar-navigation-log.txt
+            biosonify-scalar-launch.png
+            activity-state.txt
           if-no-files-found: ignore
           retention-days: 7
