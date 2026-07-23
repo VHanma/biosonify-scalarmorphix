@@ -1,20 +1,23 @@
-name: Build BioSonify V27 Native APK
+name: Build BioSonify Fixed Android APK
 
 on:
   push:
     branches:
       - main
-      - agent/biosonify-v27-build-safe
     paths:
-      - build_inputs/BioSonify_COMPLETE_V27_ANDROID_PROJECT.zip.b64
-      - build_inputs/BioSonify-V27-TRIGGER.txt
-      - .github/workflows/build-biosonify-v27-native.yml
-  pull_request:
-    branches:
-      - main
-    paths:
-      - build_inputs/BioSonify_COMPLETE_V27_ANDROID_PROJECT.zip.b64
-      - build_inputs/BioSonify-V27-TRIGGER.txt
+      - app/**
+      - assets/**
+      - components/**
+      - constants/**
+      - hooks/**
+      - lib/**
+      - scripts/**
+      - app.config.ts
+      - babel.config.js
+      - metro.config.js
+      - package.json
+      - pnpm-lock.yaml
+      - tsconfig.json
       - .github/workflows/build-biosonify-v27-native.yml
   workflow_dispatch:
 
@@ -24,11 +27,26 @@ permissions:
 jobs:
   build-apk:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 45
+    env:
+      CI: '1'
+      EXPO_NO_TELEMETRY: '1'
+      NODE_OPTIONS: '--max-old-space-size=6144'
 
     steps:
-      - name: Check out build branch
+      - name: Check out real BioSonify source
         uses: actions/checkout@v4
+
+      - name: Set up Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: '9.12.0'
+          run_install: false
 
       - name: Set up Java 17
         uses: actions/setup-java@v4
@@ -39,47 +57,29 @@ jobs:
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
 
-      - name: Install Android 35 build components
-        shell: bash
+      - name: Install project dependencies
+        run: pnpm install --no-frozen-lockfile
+
+      - name: Generate native Android project
+        run: pnpm exec expo prebuild --platform android --clean
+
+      - name: Build installable debug APK
+        working-directory: android
         run: |
-          yes | sdkmanager --licenses >/dev/null || true
-          sdkmanager "platform-tools" "platforms;android-35" "build-tools;35.0.0"
+          chmod +x gradlew
+          ./gradlew :app:assembleDebug --no-daemon --stacktrace
 
-      - name: Set up Gradle 8.9
-        uses: gradle/actions/setup-gradle@v4
-        with:
-          gradle-version: '8.9'
-
-      - name: Restore uploaded Android project
-        shell: bash
+      - name: Name and hash finished APK
         run: |
-          base64 --decode build_inputs/BioSonify_COMPLETE_V27_ANDROID_PROJECT.zip.b64 > BioSonify_COMPLETE_V27_ANDROID_PROJECT.zip
-          unzip -q BioSonify_COMPLETE_V27_ANDROID_PROJECT.zip
+          cp android/app/build/outputs/apk/debug/app-debug.apk BioSonify-FIXED-OneClick.apk
+          sha256sum BioSonify-FIXED-OneClick.apk > BioSonify-FIXED-OneClick-SHA256.txt
 
-      - name: Build debug APK
-        shell: bash
-        run: |
-          set -o pipefail
-          cd BioSonifyCloneAndroid
-          gradle --no-daemon --stacktrace :app:assembleDebug 2>&1 | tee ../biosonify-build.log
-
-      - name: Name finished APK
-        if: success()
-        shell: bash
-        run: cp BioSonifyCloneAndroid/app/build/outputs/apk/debug/app-debug.apk BioSonify-V27-debug.apk
-
-      - name: Upload installable APK
-        if: success()
+      - name: Upload installable fixed APK
         uses: actions/upload-artifact@v4
         with:
-          name: BioSonify-V27-APK
-          path: BioSonify-V27-debug.apk
+          name: BioSonify-FIXED-OneClick
+          path: |
+            BioSonify-FIXED-OneClick.apk
+            BioSonify-FIXED-OneClick-SHA256.txt
           if-no-files-found: error
-
-      - name: Upload build log
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: BioSonify-V27-build-log
-          path: biosonify-build.log
-          if-no-files-found: ignore
+          retention-days: 30
