@@ -1,4 +1,4 @@
-name: Diagnose and Launch-Test BioSonify Scalar APK
+name: Final Launch-Test BioSonify Scalar APK
 
 on:
   pull_request:
@@ -13,12 +13,12 @@ permissions:
   actions: read
 
 jobs:
-  diagnose-launch:
+  final-launch-test:
     runs-on: ubuntu-22.04
     timeout-minutes: 40
     env:
       APP_PACKAGE: com.vhanma.biosonify.scalarparallax
-      MAIN_ACTIVITY: com.vhanma.biosonify.scalarparallax.MainActivity
+      MAIN_COMPONENT: com.vhanma.biosonify.scalarparallax/.MainActivity
       ANDROID_HOME: /usr/local/lib/android/sdk
       ANDROID_SDK_ROOT: /usr/local/lib/android/sdk
       PATH: /usr/local/lib/android/sdk/platform-tools:/usr/local/lib/android/sdk/emulator:/usr/local/lib/android/sdk/cmdline-tools/latest/bin:/usr/bin:/bin
@@ -70,8 +70,11 @@ jobs:
           done
           test "$(adb shell getprop sys.boot_completed | tr -d '\r')" = "1"
           adb shell input keyevent 82 || true
+          adb shell settings put global window_animation_scale 0
+          adb shell settings put global transition_animation_scale 0
+          adb shell settings put global animator_duration_scale 0
 
-      - name: Install and directly start MainActivity
+      - name: Install, launch, and navigate exact APK
         shell: bash
         run: |
           set +e
@@ -79,7 +82,6 @@ jobs:
 
           adb install -r "$APK" > install-result.txt 2>&1
           INSTALL_CODE=$?
-          adb shell pm path "$APP_PACKAGE" > package-path.txt 2>&1
           adb shell cmd package resolve-activity --brief \
             -a android.intent.action.MAIN \
             -c android.intent.category.LAUNCHER \
@@ -87,47 +89,50 @@ jobs:
 
           adb shell am force-stop "$APP_PACKAGE"
           adb logcat -c
-          adb shell am start -W -S -n "$MAIN_ACTIVITY" > activity-start-result.txt 2>&1
+          adb shell am start -W -S -n "$MAIN_COMPONENT" > activity-start-result.txt 2>&1
           START_CODE=$?
           sleep 20
 
           adb shell pidof "$APP_PACKAGE" > process-id.txt 2>&1
           adb shell dumpsys activity activities > activity-state.txt 2>&1
-          adb shell dumpsys package "$APP_PACKAGE" > package-dump.txt 2>&1
           adb logcat -d -v threadtime > biosonify-scalar-emulator-log.txt 2>&1
           adb exec-out screencap -p > biosonify-scalar-launch.png 2>/dev/null
 
           echo "INSTALL_CODE=$INSTALL_CODE" | tee launch-status.txt
           echo "START_CODE=$START_CODE" | tee -a launch-status.txt
           echo "PID=$(cat process-id.txt | tr -d '\r')" | tee -a launch-status.txt
-          cat install-result.txt
           cat resolved-activity.txt
           cat activity-start-result.txt
 
-          if [ "$INSTALL_CODE" -ne 0 ]; then
-            echo "APK installation failed" >&2
-            exit 1
-          fi
-          if [ "$START_CODE" -ne 0 ]; then
-            echo "MainActivity command failed" >&2
-            exit 1
-          fi
-          if [ ! -s process-id.txt ]; then
-            echo "App process did not survive startup" >&2
-            grep -E -A 80 -B 20 "FATAL EXCEPTION|AndroidRuntime|ReactNativeJS|SoLoader|UnsatisfiedLinkError|Unable to start activity|${APP_PACKAGE}" biosonify-scalar-emulator-log.txt || true
-            exit 1
-          fi
-          if grep -E "FATAL EXCEPTION|Unable to start activity|Process: ${APP_PACKAGE}" biosonify-scalar-emulator-log.txt; then
-            echo "Fatal Android exception detected" >&2
-            exit 1
-          fi
-          if grep -E "ReactNativeJS:.*(TypeError|ReferenceError|Invariant Violation|Error:)" biosonify-scalar-emulator-log.txt; then
-            echo "Fatal React Native JavaScript exception detected" >&2
+          FAILED=0
+          [ "$INSTALL_CODE" -eq 0 ] || FAILED=1
+          [ "$START_CODE" -eq 0 ] || FAILED=1
+          [ -s process-id.txt ] || FAILED=1
+          grep -E "mResumedActivity|topResumedActivity" activity-state.txt | grep "$APP_PACKAGE" || FAILED=1
+          grep -E "FATAL EXCEPTION|Unable to start activity|Process: ${APP_PACKAGE}" biosonify-scalar-emulator-log.txt && FAILED=1
+          grep -E "ReactNativeJS:.*(TypeError|ReferenceError|Invariant Violation|Error:)" biosonify-scalar-emulator-log.txt && FAILED=1
+
+          if [ "$FAILED" -ne 0 ]; then
+            echo "Startup failed; printing app-related log" >&2
+            grep -E -A 100 -B 30 "FATAL EXCEPTION|AndroidRuntime|ReactNativeJS|SoLoader|UnsatisfiedLinkError|Unable to start activity|${APP_PACKAGE}" biosonify-scalar-emulator-log.txt || true
             exit 1
           fi
 
-          grep -E "mResumedActivity|topResumedActivity" activity-state.txt | grep "$APP_PACKAGE"
-          echo "Direct MainActivity launch passed"
+          SIZE="$(adb shell wm size | tail -1 | grep -oE '[0-9]+x[0-9]+')"
+          WIDTH="${SIZE%x*}"
+          HEIGHT="${SIZE#*x}"
+          Y=$((HEIGHT - 120))
+          for PERCENT in 37 62 87 12; do
+            X=$((WIDTH * PERCENT / 100))
+            adb shell input tap "$X" "$Y"
+            sleep 4
+            test -n "$(adb shell pidof "$APP_PACKAGE" | tr -d '\r')" || exit 1
+          done
+
+          adb logcat -d -v threadtime > biosonify-scalar-navigation-log.txt 2>&1
+          adb exec-out screencap -p > biosonify-scalar-after-navigation.png 2>/dev/null
+          grep -E "FATAL EXCEPTION|Unable to start activity|Process: ${APP_PACKAGE}" biosonify-scalar-navigation-log.txt && exit 1
+          echo "Exact APK launch and navigation passed"
 
       - name: Upload launch-tested APK
         uses: actions/upload-artifact@v4
@@ -142,7 +147,9 @@ jobs:
             candidate/architecture-check.txt
             candidate/universal-release-build.log
             biosonify-scalar-emulator-log.txt
+            biosonify-scalar-navigation-log.txt
             biosonify-scalar-launch.png
+            biosonify-scalar-after-navigation.png
             activity-start-result.txt
             activity-state.txt
             launch-status.txt
@@ -150,20 +157,19 @@ jobs:
           if-no-files-found: error
           retention-days: 30
 
-      - name: Upload complete diagnostics
+      - name: Upload diagnostics
         if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: BioSonify-Scalar-Startup-Diagnostics
+          name: BioSonify-Scalar-Final-Diagnostics
           path: |
             emulator-console.log
             install-result.txt
-            package-path.txt
             resolved-activity.txt
             activity-start-result.txt
             activity-state.txt
-            package-dump.txt
             biosonify-scalar-emulator-log.txt
+            biosonify-scalar-navigation-log.txt
             biosonify-scalar-launch.png
             launch-status.txt
             process-id.txt
