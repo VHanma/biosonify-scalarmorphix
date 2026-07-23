@@ -18,6 +18,26 @@ on:
       - package.json
       - pnpm-lock.yaml
       - tsconfig.json
+      - build_inputs/BioSonify-FIXED-TRIGGER.txt
+      - .github/workflows/build-biosonify-v27-native.yml
+  pull_request:
+    branches:
+      - main
+    paths:
+      - app/**
+      - assets/**
+      - components/**
+      - constants/**
+      - hooks/**
+      - lib/**
+      - scripts/**
+      - app.config.ts
+      - babel.config.js
+      - metro.config.js
+      - package.json
+      - pnpm-lock.yaml
+      - tsconfig.json
+      - build_inputs/BioSonify-FIXED-TRIGGER.txt
       - .github/workflows/build-biosonify-v27-native.yml
   workflow_dispatch:
 
