@@ -1,0 +1,285 @@
+name: Build Launch-Tested BioSonify Contact Wave APK
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - build_inputs/contact-wave-v2.b64.part*
+      - .github/workflows/build-contact-wave-god00.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-test:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 65
+    env:
+      CI: '1'
+      EXPO_NO_TELEMETRY: '1'
+      NODE_OPTIONS: '--max-old-space-size=6144'
+      APP_PACKAGE: com.vhanma.biosonify.contactwavegod00
+      MAIN_COMPONENT: com.vhanma.biosonify.contactwavegod00/.MainActivity
+      APK_FILE: BioSonify-ContactWave-God00-OneClick.apk
+      ANDROID_HOME: /usr/local/lib/android/sdk
+      ANDROID_SDK_ROOT: /usr/local/lib/android/sdk
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Expand checksum-locked Contact Wave source
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat build_inputs/contact-wave-v2.b64.part* > contact-wave-overlay.b64
+          base64 -d contact-wave-overlay.b64 > contact-wave-overlay.zip
+          echo '4c3d4c44cf33a07dbcaae713dc645eb086f26b02140cb8fd8ea8b975422921a8  contact-wave-overlay.zip' | sha256sum -c -
+          unzip -o contact-wave-overlay.zip
+          test -f 'app/(tabs)/contact.tsx'
+          test -f components/live-waveform.tsx
+          test -f components/cymatics-visualizer.tsx
+          test -f lib/pixel-integrity.ts
+          test -f lib/pixel-contact-engine.ts
+          test -f lib/god-helmet-audio.ts
+          grep -q 'No synthetic fallback was used' lib/use-image-pixels.ts
+          grep -q 'ACTIVE NODAL FIELD' components/cymatics-visualizer.tsx
+          grep -q 'God Helmet Audio Chamber' 'app/(tabs)/brain.tsx'
+          grep -q 'Contact Wave Lab' 'app/(tabs)/contact.tsx'
+          grep -q 'Generated PCM waveform' 'app/(tabs)/contact.tsx'
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - uses: pnpm/action-setup@v4
+        with:
+          version: '9.12.0'
+          run_install: false
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Install aligned Expo SDK 54 dependencies
+        shell: bash
+        run: |
+          set -o pipefail
+          pnpm install --no-frozen-lockfile 2>&1 | tee pnpm-install.log
+          test ${PIPESTATUS[0]} -eq 0
+          pnpm exec expo install --fix 2>&1 | tee expo-install-fix.log
+          test ${PIPESTATUS[0]} -eq 0
+          pnpm install --no-frozen-lockfile 2>&1 | tee -a pnpm-install.log
+          test ${PIPESTATUS[0]} -eq 0
+          pnpm exec expo install --check 2>&1 | tee expo-dependency-check.txt || true
+          cp package.json resolved-package.json
+
+      - name: Prove one-pixel uniqueness and all audio engines
+        shell: bash
+        run: |
+          set -o pipefail
+          pnpm exec tsx scripts/smoke-pixel-integrity.ts 2>&1 | tee pixel-integrity-smoke.txt
+          test ${PIPESTATUS[0]} -eq 0
+          grep -q 'valid=true' pixel-integrity-smoke.txt
+          grep -q 'source_pixels=4096' pixel-integrity-smoke.txt
+          pnpm exec tsx scripts/smoke-contact-engine.ts 2>&1 | tee contact-engine-smoke.txt
+          test ${PIPESTATUS[0]} -eq 0
+          test "$(grep -c 'valid=true' contact-engine-smoke.txt)" -ge 5
+
+      - name: Generate and build Android release
+        shell: bash
+        run: |
+          set -o pipefail
+          pnpm exec expo prebuild --platform android --clean 2>&1 | tee prebuild.log
+          test ${PIPESTATUS[0]} -eq 0
+          grep -R "applicationId.*${APP_PACKAGE}" android/app/build.gradle
+          grep '^reactNativeArchitectures=' android/gradle.properties | tee architecture-check.txt
+          grep 'arm64-v8a' architecture-check.txt
+          grep 'x86_64' architecture-check.txt
+          chmod +x android/gradlew
+          (cd android && ./gradlew :app:assembleRelease --no-daemon --stacktrace) 2>&1 | tee release-build.log
+          test ${PIPESTATUS[0]} -eq 0
+
+      - name: Verify package, label, signature and ABIs
+        shell: bash
+        run: |
+          set -euo pipefail
+          cp android/app/build/outputs/apk/release/app-release.apk "$APK_FILE"
+          APKSIGNER="$(find "$ANDROID_HOME/build-tools" -name apksigner -type f | sort -V | tail -1)"
+          AAPT="$(find "$ANDROID_HOME/build-tools" -name aapt -type f | sort -V | tail -1)"
+          "$APKSIGNER" verify --verbose --print-certs "$APK_FILE" | tee apk-signature.txt
+          "$AAPT" dump badging "$APK_FILE" | tee apk-badging.txt
+          unzip -l "$APK_FILE" | tee apk-files.txt
+          grep "package: name='${APP_PACKAGE}'" apk-badging.txt
+          grep "application-label:'BioSonify Contact Wave'" apk-badging.txt
+          grep 'lib/arm64-v8a/' apk-files.txt
+          grep 'lib/x86_64/' apk-files.txt
+          sha256sum "$APK_FILE" > BioSonify-ContactWave-God00-OneClick-SHA256.txt
+
+      - name: Boot Android 14 automation emulator
+        shell: bash
+        run: |
+          set -euo pipefail
+          export PATH="$ANDROID_HOME/platform-tools:$ANDROID_HOME/emulator:$ANDROID_HOME/cmdline-tools/latest/bin:$PATH"
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager "platform-tools" "emulator" "system-images;android-34;aosp_atd;x86_64"
+          sudo chmod 666 /dev/kvm
+          echo no | avdmanager create avd --force --name contact_wave_test --package "system-images;android-34;aosp_atd;x86_64" --device "pixel_6"
+          emulator -avd contact_wave_test -no-window -noaudio -no-boot-anim -no-snapshot -no-metrics -gpu swiftshader_indirect -camera-back none -camera-front none -memory 3072 > emulator-console.log 2>&1 &
+          adb wait-for-device
+          for i in $(seq 1 120); do
+            [ "$(adb shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')" = "1" ] && break
+            sleep 5
+          done
+          test "$(adb shell getprop sys.boot_completed | tr -d '\r')" = "1"
+          adb shell settings put global hide_error_dialogs 1 || true
+          adb shell settings put global show_first_crash_dialog 0 || true
+          adb shell settings put global window_animation_scale 0 || true
+          adb shell settings put global transition_animation_scale 0 || true
+          adb shell settings put global animator_duration_scale 0 || true
+          adb shell input keyevent 82 || true
+          adb shell am force-stop com.android.launcher3 || true
+          sleep 3
+
+      - name: Install, launch and prove Helmet plus Contact screens
+        shell: bash
+        run: |
+          export PATH="$ANDROID_HOME/platform-tools:$PATH"
+          set +e
+          adb install -r "$APK_FILE" > install-result.txt 2>&1; INSTALL_CODE=$?
+          adb shell am force-stop com.android.launcher3 || true
+          adb shell input keyevent 4 || true
+          adb shell am force-stop "$APP_PACKAGE"
+          adb logcat -c
+          adb shell am start -W -S -n "$MAIN_COMPONENT" > activity-start-result.txt 2>&1; START_CODE=$?
+          sleep 20
+          adb shell pidof "$APP_PACKAGE" > process-id.txt 2>&1
+          adb shell dumpsys activity activities > activity-state.txt 2>&1
+          adb logcat -d -v threadtime > launch-log.txt 2>&1
+          adb exec-out screencap -p > launch-screen.png 2>/dev/null
+          FAILED=0
+          [ "$INSTALL_CODE" -eq 0 ] || FAILED=1
+          [ "$START_CODE" -eq 0 ] || FAILED=1
+          [ -s process-id.txt ] || FAILED=1
+          grep -E "mResumedActivity|topResumedActivity" activity-state.txt | grep "$APP_PACKAGE" || FAILED=1
+          grep -E "FATAL EXCEPTION|Unable to start activity|Process: ${APP_PACKAGE}|ReactNativeJS:.*(TypeError|ReferenceError|Invariant Violation|Error:)" launch-log.txt && FAILED=1
+          [ "$FAILED" -eq 0 ] || exit 1
+
+          set -euo pipefail
+          SIZE="$(adb shell wm size | tail -1 | grep -oE '[0-9]+x[0-9]+')"
+          WIDTH="${SIZE%x*}"
+          HEIGHT="${SIZE#*x}"
+          Y=$((HEIGHT - 115))
+          MID_X=$((WIDTH / 2))
+          SWIPE_START=$((HEIGHT * 78 / 100))
+          SWIPE_END=$((HEIGHT * 28 / 100))
+
+          # Helmet is the third of five tabs.
+          adb shell input tap "$((WIDTH * 50 / 100))" "$Y"
+          sleep 5
+          : > helmet-ui-all.xml
+          for PASS in 1 2 3 4 5; do
+            adb shell uiautomator dump /sdcard/helmet.xml >/dev/null
+            adb pull /sdcard/helmet.xml helmet-ui-pass.xml >/dev/null
+            cat helmet-ui-pass.xml >> helmet-ui-all.xml
+            grep -q 'God Helmet Audio Chamber' helmet-ui-all.xml || true
+            grep -Eq 'ACTIVE NODAL FIELD|COMPUTED NODAL FIELD' helmet-ui-all.xml && break
+            adb shell input swipe "$MID_X" "$SWIPE_START" "$MID_X" "$SWIPE_END" 550
+            sleep 2
+          done
+          cp helmet-ui-all.xml helmet-ui.xml
+          grep -q 'God Helmet Audio Chamber' helmet-ui.xml
+          grep -Eq 'ACTIVE NODAL FIELD|COMPUTED NODAL FIELD' helmet-ui.xml
+          adb exec-out screencap -p > helmet-screen.png 2>/dev/null
+          test -n "$(adb shell pidof "$APP_PACKAGE" | tr -d '\r')"
+
+          # Contact is the fourth of five tabs.
+          adb shell input tap "$((WIDTH * 70 / 100))" "$Y"
+          sleep 5
+          : > contact-ui-all.xml
+          for PASS in 1 2 3 4 5 6; do
+            adb shell uiautomator dump /sdcard/contact.xml >/dev/null
+            adb pull /sdcard/contact.xml contact-ui-pass.xml >/dev/null
+            cat contact-ui-pass.xml >> contact-ui-all.xml
+            if grep -q 'Generated PCM waveform' contact-ui-all.xml && grep -Eq 'ACTIVE NODAL FIELD|COMPUTED NODAL FIELD' contact-ui-all.xml; then
+              break
+            fi
+            adb shell input swipe "$MID_X" "$SWIPE_START" "$MID_X" "$SWIPE_END" 550
+            sleep 2
+          done
+          cp contact-ui-all.xml contact-ui.xml
+          grep -q 'Contact Wave Lab' contact-ui.xml
+          grep -q 'Experimental, not a detector' contact-ui.xml
+          grep -q 'Generated PCM waveform' contact-ui.xml
+          grep -Eq 'ACTIVE NODAL FIELD|COMPUTED NODAL FIELD' contact-ui.xml
+          adb exec-out screencap -p > contact-screen.png 2>/dev/null
+          test -n "$(adb shell pidof "$APP_PACKAGE" | tr -d '\r')"
+
+          for PERCENT in 10 30 50 70 90 10; do
+            adb shell input tap "$((WIDTH * PERCENT / 100))" "$Y"
+            sleep 3
+            test -n "$(adb shell pidof "$APP_PACKAGE" | tr -d '\r')"
+          done
+          adb shell dumpsys activity activities > navigation-activity-state.txt 2>&1
+          adb logcat -d -v threadtime > navigation-log.txt 2>&1
+          grep -E "mResumedActivity|topResumedActivity" navigation-activity-state.txt | grep "$APP_PACKAGE"
+          ! grep -E "FATAL EXCEPTION|Unable to start activity|Process: ${APP_PACKAGE}|ReactNativeJS:.*(TypeError|ReferenceError|Invariant Violation|Error:)" navigation-log.txt
+
+      - name: Upload proven APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: BioSonify-ContactWave-God00-WORKING
+          path: |
+            BioSonify-ContactWave-God00-OneClick.apk
+            BioSonify-ContactWave-God00-OneClick-SHA256.txt
+            apk-badging.txt
+            apk-signature.txt
+            apk-files.txt
+            architecture-check.txt
+            resolved-package.json
+            pixel-integrity-smoke.txt
+            contact-engine-smoke.txt
+            release-build.log
+            launch-log.txt
+            navigation-log.txt
+            launch-screen.png
+            helmet-screen.png
+            contact-screen.png
+            helmet-ui.xml
+            contact-ui.xml
+            activity-start-result.txt
+            activity-state.txt
+            navigation-activity-state.txt
+            process-id.txt
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Upload diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: BioSonify-ContactWave-God00-Diagnostics
+          path: |
+            pnpm-install.log
+            expo-install-fix.log
+            expo-dependency-check.txt
+            pixel-integrity-smoke.txt
+            contact-engine-smoke.txt
+            prebuild.log
+            release-build.log
+            emulator-console.log
+            install-result.txt
+            activity-start-result.txt
+            activity-state.txt
+            navigation-activity-state.txt
+            launch-log.txt
+            navigation-log.txt
+            launch-screen.png
+            helmet-screen.png
+            contact-screen.png
+            helmet-ui.xml
+            contact-ui.xml
+            helmet-ui-pass.xml
+            contact-ui-pass.xml
+            process-id.txt
+          if-no-files-found: ignore
+          retention-days: 7
