@@ -4,7 +4,7 @@ on:
   pull_request:
     branches: [main]
     paths:
-      - build_inputs/contact-wave-overlay.b64.part*
+      - build_inputs/contact-wave-v2.b64.part*
       - .github/workflows/build-contact-wave-god00.yml
   workflow_dispatch:
 
@@ -32,7 +32,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          cat build_inputs/contact-wave-overlay.b64.part* > contact-wave-overlay.b64
+          cat build_inputs/contact-wave-v2.b64.part* > contact-wave-overlay.b64
           base64 -d contact-wave-overlay.b64 > contact-wave-overlay.zip
           echo '4c3d4c44cf33a07dbcaae713dc645eb086f26b02140cb8fd8ea8b975422921a8  contact-wave-overlay.zip' | sha256sum -c -
           unzip -o contact-wave-overlay.zip
