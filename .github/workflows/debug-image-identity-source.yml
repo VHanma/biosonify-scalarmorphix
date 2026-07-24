@@ -1,0 +1,70 @@
+name: Diagnose Image Identity Source Chunks
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - .github/workflows/debug-image-identity-source.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Inspect and reconstruct chunks
+        shell: bash
+        run: |
+          set +e
+          {
+            echo "CHUNK LIST"
+            find build_inputs -maxdepth 1 -name 'image-identity-v2.b64.part*' -print | sort
+            echo
+            echo "CHUNK COUNT"
+            find build_inputs -maxdepth 1 -name 'image-identity-v2.b64.part*' | wc -l
+            echo
+            echo "CHUNK LENGTHS AND HASHES"
+            for f in $(find build_inputs -maxdepth 1 -name 'image-identity-v2.b64.part*' -print | sort); do
+              printf '%s bytes=' "$f"
+              wc -c < "$f" | tr -d '\n'
+              printf ' sha256='
+              sha256sum "$f" | cut -d' ' -f1
+              printf ' first8='
+              head -c 8 "$f"; echo
+              printf ' last8='
+              tail -c 8 "$f"; echo
+            done
+            echo
+            cat $(find build_inputs -maxdepth 1 -name 'image-identity-v2.b64.part*' -print | sort) > image-identity-overlay.b64
+            echo "COMBINED BASE64 BYTES $(wc -c < image-identity-overlay.b64)"
+            echo "COMBINED BASE64 SHA256 $(sha256sum image-identity-overlay.b64 | cut -d' ' -f1)"
+            base64 -d image-identity-overlay.b64 > image-identity-overlay.zip 2>base64-error.txt
+            BASE64_CODE=$?
+            echo "BASE64 EXIT $BASE64_CODE"
+            cat base64-error.txt
+            echo "ZIP BYTES $(wc -c < image-identity-overlay.zip)"
+            echo "ZIP SHA256 $(sha256sum image-identity-overlay.zip | cut -d' ' -f1)"
+            file image-identity-overlay.zip
+            unzip -t image-identity-overlay.zip > unzip-test.txt 2>&1
+            ZIP_CODE=$?
+            echo "UNZIP EXIT $ZIP_CODE"
+            cat unzip-test.txt
+          } | tee source-diagnostic.txt
+          exit 0
+
+      - name: Upload source diagnostics
+        uses: actions/upload-artifact@v4
+        with:
+          name: Image-Identity-Source-Diagnostics
+          path: |
+            source-diagnostic.txt
+            base64-error.txt
+            unzip-test.txt
+            image-identity-overlay.b64
+            image-identity-overlay.zip
+          if-no-files-found: error
+          retention-days: 7
