@@ -46,6 +46,7 @@ jobs:
           grep -q 'ACTIVE NODAL FIELD' components/cymatics-visualizer.tsx
           grep -q 'God Helmet Audio Chamber' 'app/(tabs)/brain.tsx'
           grep -q 'Contact Wave Lab' 'app/(tabs)/contact.tsx'
+          grep -q 'Generated PCM waveform' 'app/(tabs)/contact.tsx'
 
       - uses: actions/setup-node@v4
         with:
@@ -114,7 +115,7 @@ jobs:
           grep 'lib/x86_64/' apk-files.txt
           sha256sum "$APK_FILE" > BioSonify-ContactWave-God00-OneClick-SHA256.txt
 
-      - name: Boot Android 14 emulator
+      - name: Boot Android 14 automation emulator
         shell: bash
         run: |
           set -euo pipefail
@@ -137,7 +138,6 @@ jobs:
           adb shell settings put global animator_duration_scale 0 || true
           adb shell input keyevent 82 || true
           adb shell am force-stop com.android.launcher3 || true
-          adb shell am force-stop com.google.android.apps.nexuslauncher || true
           sleep 3
 
       - name: Install, launch and prove Helmet plus Contact screens
@@ -147,7 +147,6 @@ jobs:
           set +e
           adb install -r "$APK_FILE" > install-result.txt 2>&1; INSTALL_CODE=$?
           adb shell am force-stop com.android.launcher3 || true
-          adb shell am force-stop com.google.android.apps.nexuslauncher || true
           adb shell input keyevent 4 || true
           adb shell am force-stop "$APP_PACKAGE"
           adb logcat -c
@@ -167,29 +166,55 @@ jobs:
 
           set -euo pipefail
           SIZE="$(adb shell wm size | tail -1 | grep -oE '[0-9]+x[0-9]+')"
-          WIDTH="${SIZE%x*}"; HEIGHT="${SIZE#*x}"; Y=$((HEIGHT - 115))
+          WIDTH="${SIZE%x*}"
+          HEIGHT="${SIZE#*x}"
+          Y=$((HEIGHT - 115))
+          MID_X=$((WIDTH / 2))
+          SWIPE_START=$((HEIGHT * 78 / 100))
+          SWIPE_END=$((HEIGHT * 28 / 100))
 
-          adb shell input tap "$((WIDTH * 42 / 100))" "$Y"
-          sleep 6
-          adb shell uiautomator dump /sdcard/helmet.xml >/dev/null
-          adb pull /sdcard/helmet.xml helmet-ui.xml >/dev/null
+          # Helmet is the third of five tabs.
+          adb shell input tap "$((WIDTH * 50 / 100))" "$Y"
+          sleep 5
+          : > helmet-ui-all.xml
+          for PASS in 1 2 3 4 5; do
+            adb shell uiautomator dump /sdcard/helmet.xml >/dev/null
+            adb pull /sdcard/helmet.xml helmet-ui-pass.xml >/dev/null
+            cat helmet-ui-pass.xml >> helmet-ui-all.xml
+            grep -q 'God Helmet Audio Chamber' helmet-ui-all.xml || true
+            grep -Eq 'ACTIVE NODAL FIELD|COMPUTED NODAL FIELD' helmet-ui-all.xml && break
+            adb shell input swipe "$MID_X" "$SWIPE_START" "$MID_X" "$SWIPE_END" 550
+            sleep 2
+          done
+          cp helmet-ui-all.xml helmet-ui.xml
           grep -q 'God Helmet Audio Chamber' helmet-ui.xml
-          grep -q 'COMPUTED NODAL FIELD' helmet-ui.xml
+          grep -Eq 'ACTIVE NODAL FIELD|COMPUTED NODAL FIELD' helmet-ui.xml
           adb exec-out screencap -p > helmet-screen.png 2>/dev/null
           test -n "$(adb shell pidof "$APP_PACKAGE" | tr -d '\r')"
 
-          adb shell input tap "$((WIDTH * 75 / 100))" "$Y"
-          sleep 6
-          adb shell uiautomator dump /sdcard/contact.xml >/dev/null
-          adb pull /sdcard/contact.xml contact-ui.xml >/dev/null
+          # Contact is the fourth of five tabs.
+          adb shell input tap "$((WIDTH * 70 / 100))" "$Y"
+          sleep 5
+          : > contact-ui-all.xml
+          for PASS in 1 2 3 4 5 6; do
+            adb shell uiautomator dump /sdcard/contact.xml >/dev/null
+            adb pull /sdcard/contact.xml contact-ui-pass.xml >/dev/null
+            cat contact-ui-pass.xml >> contact-ui-all.xml
+            if grep -q 'Generated PCM waveform' contact-ui-all.xml && grep -Eq 'ACTIVE NODAL FIELD|COMPUTED NODAL FIELD' contact-ui-all.xml; then
+              break
+            fi
+            adb shell input swipe "$MID_X" "$SWIPE_START" "$MID_X" "$SWIPE_END" 550
+            sleep 2
+          done
+          cp contact-ui-all.xml contact-ui.xml
           grep -q 'Contact Wave Lab' contact-ui.xml
           grep -q 'Experimental, not a detector' contact-ui.xml
           grep -q 'Generated PCM waveform' contact-ui.xml
-          grep -q 'COMPUTED NODAL FIELD' contact-ui.xml
+          grep -Eq 'ACTIVE NODAL FIELD|COMPUTED NODAL FIELD' contact-ui.xml
           adb exec-out screencap -p > contact-screen.png 2>/dev/null
           test -n "$(adb shell pidof "$APP_PACKAGE" | tr -d '\r')"
 
-          for PERCENT in 8 25 42 58 75 92 8; do
+          for PERCENT in 10 30 50 70 90 10; do
             adb shell input tap "$((WIDTH * PERCENT / 100))" "$Y"
             sleep 3
             test -n "$(adb shell pidof "$APP_PACKAGE" | tr -d '\r')"
@@ -253,6 +278,8 @@ jobs:
             contact-screen.png
             helmet-ui.xml
             contact-ui.xml
+            helmet-ui-pass.xml
+            contact-ui-pass.xml
             process-id.txt
           if-no-files-found: ignore
           retention-days: 7
