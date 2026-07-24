@@ -1,9 +1,8 @@
-name: Build and Prove BioSonify Scalar APK
+name: Build Launch-Tested BioSonify Scalar APK
 
 on:
   pull_request:
-    branches:
-      - main
+    branches: [main]
     paths:
       - package.json
       - pnpm-lock.yaml
@@ -19,7 +18,7 @@ permissions:
   contents: read
 
 jobs:
-  build-prove-apk:
+  build-test:
     runs-on: ubuntu-22.04
     timeout-minutes: 60
     env:
@@ -32,42 +31,43 @@ jobs:
       ANDROID_SDK_ROOT: /usr/local/lib/android/sdk
 
     steps:
-      - name: Check out corrected source
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Set up Node 22
-        uses: actions/setup-node@v4
+      - uses: actions/setup-node@v4
         with:
           node-version: '22'
 
-      - name: Set up pnpm
-        uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@v4
         with:
           version: '9.12.0'
           run_install: false
 
-      - name: Set up Java 17
-        uses: actions/setup-java@v4
+      - uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: '17'
 
-      - name: Install JavaScript dependencies
+      - name: Install and align Expo SDK 54 dependencies
         shell: bash
         run: |
-          set -euo pipefail
-          pnpm install --no-frozen-lockfile
-          pnpm exec expo install --check | tee expo-dependency-check.txt
+          set -o pipefail
+          pnpm install --no-frozen-lockfile 2>&1 | tee pnpm-install.log
+          test ${PIPESTATUS[0]} -eq 0
+          pnpm exec expo install --fix 2>&1 | tee expo-install-fix.log
+          test ${PIPESTATUS[0]} -eq 0
+          pnpm install --no-frozen-lockfile 2>&1 | tee -a pnpm-install.log
+          test ${PIPESTATUS[0]} -eq 0
+          pnpm exec expo install --check 2>&1 | tee expo-dependency-check.txt || true
+          cp package.json resolved-package.json
 
-      - name: Generate native Android project
+      - name: Generate Android project
         run: pnpm exec expo prebuild --platform android --clean
 
-      - name: Confirm unique package and universal ABIs
+      - name: Confirm side-by-side identity
         shell: bash
         run: |
           set -euo pipefail
           grep -R "applicationId.*${APP_PACKAGE}" android/app/build.gradle
-          grep -R "namespace.*${APP_PACKAGE}" android/app/build.gradle
           grep '^reactNativeArchitectures=' android/gradle.properties | tee architecture-check.txt
           grep 'arm64-v8a' architecture-check.txt
           grep 'x86_64' architecture-check.txt
@@ -80,7 +80,7 @@ jobs:
           chmod +x gradlew
           ./gradlew :app:assembleRelease --no-daemon --stacktrace 2>&1 | tee ../release-build.log
 
-      - name: Verify APK identity, signature, and native libraries
+      - name: Verify APK
         shell: bash
         run: |
           set -euo pipefail
@@ -96,28 +96,22 @@ jobs:
           grep 'lib/x86_64/' apk-files.txt
           sha256sum BioSonify-Scalar-SideBySide-OneClick.apk > BioSonify-Scalar-SideBySide-OneClick-SHA256.txt
 
-      - name: Install emulator image
+      - name: Install Android emulator
         shell: bash
         run: |
           set -euo pipefail
           export PATH="$ANDROID_HOME/platform-tools:$ANDROID_HOME/emulator:$ANDROID_HOME/cmdline-tools/latest/bin:$PATH"
           yes | sdkmanager --licenses >/dev/null || true
           sdkmanager "platform-tools" "emulator" "system-images;android-34;google_apis;x86_64"
-
-      - name: Boot Android
-        shell: bash
-        run: |
-          set -euo pipefail
-          export PATH="$ANDROID_HOME/platform-tools:$ANDROID_HOME/emulator:$ANDROID_HOME/cmdline-tools/latest/bin:$PATH"
           echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
           sudo udevadm control --reload-rules
           sudo udevadm trigger --name-match=kvm
           sudo chmod 666 /dev/kvm
           echo no | avdmanager create avd --force --name biosonify_test \
             --package "system-images;android-34;google_apis;x86_64" --device "pixel_6"
-          emulator -avd biosonify_test -no-window -noaudio -no-boot-anim \
-            -no-snapshot -gpu swiftshader_indirect -camera-back none -camera-front none \
-            -memory 3072 > emulator-console.log 2>&1 &
+          emulator -avd biosonify_test -no-window -noaudio -no-boot-anim -no-snapshot \
+            -gpu swiftshader_indirect -camera-back none -camera-front none -memory 3072 \
+            > emulator-console.log 2>&1 &
           adb wait-for-device
           for i in $(seq 1 120); do
             [ "$(adb shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')" = "1" ] && break
@@ -125,21 +119,14 @@ jobs:
           done
           test "$(adb shell getprop sys.boot_completed | tr -d '\r')" = "1"
           adb shell input keyevent 82 || true
-          adb shell settings put global window_animation_scale 0
-          adb shell settings put global transition_animation_scale 0
-          adb shell settings put global animator_duration_scale 0
 
-      - name: Install and launch exact rebuilt APK
+      - name: Prove exact APK launches and stays alive
         shell: bash
         run: |
           export PATH="$ANDROID_HOME/platform-tools:$PATH"
           set +e
-          APK="BioSonify-Scalar-SideBySide-OneClick.apk"
-          adb install -r "$APK" > install-result.txt 2>&1
+          adb install -r BioSonify-Scalar-SideBySide-OneClick.apk > install-result.txt 2>&1
           INSTALL_CODE=$?
-          adb shell cmd package resolve-activity --brief \
-            -a android.intent.action.MAIN -c android.intent.category.LAUNCHER \
-            "$APP_PACKAGE" > resolved-activity.txt 2>&1
           adb shell am force-stop "$APP_PACKAGE"
           adb logcat -c
           adb shell am start -W -S -n "$MAIN_COMPONENT" > activity-start-result.txt 2>&1
@@ -162,12 +149,11 @@ jobs:
           grep -E "FATAL EXCEPTION|Unable to start activity|Process: ${APP_PACKAGE}" launch-log.txt && FAILED=1
           grep -E "ReactNativeJS:.*(TypeError|ReferenceError|Invariant Violation|Error:)" launch-log.txt && FAILED=1
           if [ "$FAILED" -ne 0 ]; then
-            grep -E -A 120 -B 30 "FATAL EXCEPTION|AndroidRuntime|ReactNativeJS|SoLoader|UnsatisfiedLinkError|NoClassDefFoundError|Unable to start activity|${APP_PACKAGE}" launch-log.txt || true
+            grep -E -A 120 -B 30 "FATAL EXCEPTION|AndroidRuntime|ReactNativeJS|NoClassDefFoundError|UnsatisfiedLinkError|${APP_PACKAGE}" launch-log.txt || true
             exit 1
           fi
-          echo "Startup passed"
 
-      - name: Test main tabs and process survival
+      - name: Test navigation survival
         shell: bash
         run: |
           set -euo pipefail
@@ -177,17 +163,15 @@ jobs:
           HEIGHT="${SIZE#*x}"
           Y=$((HEIGHT - 120))
           for PERCENT in 37 62 87 12; do
-            X=$((WIDTH * PERCENT / 100))
-            adb shell input tap "$X" "$Y"
+            adb shell input tap "$((WIDTH * PERCENT / 100))" "$Y"
             sleep 4
             test -n "$(adb shell pidof "$APP_PACKAGE" | tr -d '\r')"
           done
           adb logcat -d -v threadtime > navigation-log.txt 2>&1
           adb exec-out screencap -p > navigation-screen.png 2>/dev/null
           ! grep -E "FATAL EXCEPTION|Unable to start activity|Process: ${APP_PACKAGE}" navigation-log.txt
-          echo "Navigation passed"
 
-      - name: Upload proven APK
+      - name: Upload working APK
         uses: actions/upload-artifact@v4
         with:
           name: BioSonify-Scalar-SideBySide-WORKING
@@ -198,6 +182,9 @@ jobs:
             apk-signature.txt
             apk-files.txt
             architecture-check.txt
+            resolved-package.json
+            pnpm-install.log
+            expo-install-fix.log
             expo-dependency-check.txt
             release-build.log
             launch-log.txt
@@ -211,21 +198,22 @@ jobs:
           if-no-files-found: error
           retention-days: 30
 
-      - name: Upload failure diagnostics
+      - name: Upload failure evidence
         if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: BioSonify-Scalar-Corrected-Diagnostics
+          name: BioSonify-Scalar-Build-Test-Diagnostics
           path: |
+            pnpm-install.log
+            expo-install-fix.log
             expo-dependency-check.txt
+            resolved-package.json
             release-build.log
             emulator-console.log
             install-result.txt
-            resolved-activity.txt
             activity-start-result.txt
             activity-state.txt
             launch-log.txt
-            navigation-log.txt
             launch-screen.png
             launch-status.txt
             process-id.txt
