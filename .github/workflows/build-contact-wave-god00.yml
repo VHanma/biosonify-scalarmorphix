@@ -120,17 +120,25 @@ jobs:
           set -euo pipefail
           export PATH="$ANDROID_HOME/platform-tools:$ANDROID_HOME/emulator:$ANDROID_HOME/cmdline-tools/latest/bin:$PATH"
           yes | sdkmanager --licenses >/dev/null || true
-          sdkmanager "platform-tools" "emulator" "system-images;android-34;google_apis;x86_64"
+          sdkmanager "platform-tools" "emulator" "system-images;android-34;aosp_atd;x86_64"
           sudo chmod 666 /dev/kvm
-          echo no | avdmanager create avd --force --name contact_wave_test --package "system-images;android-34;google_apis;x86_64" --device "pixel_6"
-          emulator -avd contact_wave_test -no-window -noaudio -no-boot-anim -no-snapshot -gpu swiftshader_indirect -camera-back none -camera-front none -memory 3072 > emulator-console.log 2>&1 &
+          echo no | avdmanager create avd --force --name contact_wave_test --package "system-images;android-34;aosp_atd;x86_64" --device "pixel_6"
+          emulator -avd contact_wave_test -no-window -noaudio -no-boot-anim -no-snapshot -no-metrics -gpu swiftshader_indirect -camera-back none -camera-front none -memory 3072 > emulator-console.log 2>&1 &
           adb wait-for-device
           for i in $(seq 1 120); do
             [ "$(adb shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')" = "1" ] && break
             sleep 5
           done
           test "$(adb shell getprop sys.boot_completed | tr -d '\r')" = "1"
+          adb shell settings put global hide_error_dialogs 1 || true
+          adb shell settings put global show_first_crash_dialog 0 || true
+          adb shell settings put global window_animation_scale 0 || true
+          adb shell settings put global transition_animation_scale 0 || true
+          adb shell settings put global animator_duration_scale 0 || true
           adb shell input keyevent 82 || true
+          adb shell am force-stop com.android.launcher3 || true
+          adb shell am force-stop com.google.android.apps.nexuslauncher || true
+          sleep 3
 
       - name: Install, launch and prove Helmet plus Contact screens
         shell: bash
@@ -138,6 +146,9 @@ jobs:
           export PATH="$ANDROID_HOME/platform-tools:$PATH"
           set +e
           adb install -r "$APK_FILE" > install-result.txt 2>&1; INSTALL_CODE=$?
+          adb shell am force-stop com.android.launcher3 || true
+          adb shell am force-stop com.google.android.apps.nexuslauncher || true
+          adb shell input keyevent 4 || true
           adb shell am force-stop "$APP_PACKAGE"
           adb logcat -c
           adb shell am start -W -S -n "$MAIN_COMPONENT" > activity-start-result.txt 2>&1; START_CODE=$?
