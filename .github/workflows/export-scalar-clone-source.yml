@@ -1,0 +1,33 @@
+name: Export Scalar Clone Base Source
+
+on:
+  push:
+    branches: [build/scalar-field-creator-only]
+    paths:
+      - .github/workflows/export-scalar-clone-source.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  export:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Decode proven Image Identity source
+        shell: bash
+        run: |
+          set -euo pipefail
+          base64 -d build_inputs/image-identity-v4.b64.part00 > image-identity-source.zip
+          echo 'c0516a6e84815644211be277ac687dee17600daeb7dd1408374c53b8ab0d5375  image-identity-source.zip' | sha256sum -c -
+          unzip -t image-identity-source.zip | tee source-test.txt
+      - name: Upload source archive
+        uses: actions/upload-artifact@v4
+        with:
+          name: Scalar-Clone-Base-Source
+          path: |
+            image-identity-source.zip
+            source-test.txt
+          if-no-files-found: error
+          retention-days: 7
