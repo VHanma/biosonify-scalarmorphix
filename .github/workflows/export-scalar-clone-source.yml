@@ -1,0 +1,70 @@
+name: Export Scalar Clone Base Source
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - .github/workflows/export-scalar-clone-source.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  export:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Reconstruct proven Image Identity source
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat \
+            build_inputs/image-identity-v2.b64.part00 \
+            build_inputs/image-identity-v2.b64.part01 \
+            build_inputs/image-identity-v2.b64.part02 \
+            build_inputs/image-identity-v2.b64.part03 \
+            build_inputs/image-identity-v2.b64.part04 \
+            build_inputs/image-identity-v2.b64.part05 \
+            build_inputs/image-identity-v2.b64.part06 \
+            build_inputs/image-identity-v2.b64.part07 \
+            build_inputs/image-identity-v2.b64.part08 \
+            build_inputs/image-identity-v2.b64.part09 \
+            build_inputs/image-identity-v2.b64.part10 \
+            build_inputs/image-identity-v2.b64.part11 \
+            build_inputs/image-identity-v2.b64.part12 \
+            build_inputs/image-identity-v2.b64.part13 \
+            build_inputs/image-identity-v2.b64.part14 \
+            build_inputs/image-identity-v2.b64.part15 \
+            build_inputs/image-identity-v2.b64.part16 \
+            build_inputs/image-identity-v2.b64.part17 \
+            > image-identity-source.b64
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('image-identity-source.b64')
+          s = p.read_text()
+          assert len(s) == 88259, len(s)
+          s = s[:58383] + 't' + s[58383:]
+          assert s[60980] == 'a', (60980, s[60980])
+          s = s[:60980] + 'e' + s[60981:]
+          assert s[69405] == 'C', (69405, s[69405])
+          s = s[:69405] + 'K' + s[69406:]
+          assert s[69407] == 'h', (69407, s[69407])
+          s = s[:69407] + 'g' + s[69408:]
+          assert len(s) == 88260, len(s)
+          p.write_text(s)
+          PY
+          echo 'fddec40e3fff1d995855842d0d4c8cfb2f0c7cc7b6b4d72f72913387d8b8fe3e  image-identity-source.b64' | sha256sum -c -
+          base64 -d image-identity-source.b64 > image-identity-source.zip
+          echo 'c0516a6e84815644211be277ac687dee17600daeb7dd1408374c53b8ab0d5375  image-identity-source.zip' | sha256sum -c -
+          unzip -t image-identity-source.zip | tee source-test.txt
+      - name: Upload source archive
+        uses: actions/upload-artifact@v4
+        with:
+          name: Scalar-Clone-Base-Source
+          path: |
+            image-identity-source.zip
+            image-identity-source.b64
+            source-test.txt
+          if-no-files-found: error
+          retention-days: 7

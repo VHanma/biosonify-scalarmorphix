@@ -1,0 +1,251 @@
+name: Build Launch-Tested BioSonify Image Identity APK
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - build_inputs/image-identity-v1.b64.part*
+      - .github/workflows/build-image-identity.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-test:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 70
+    env:
+      CI: '1'
+      EXPO_NO_TELEMETRY: '1'
+      NODE_OPTIONS: '--max-old-space-size=6144'
+      APP_PACKAGE: com.vhanma.biosonify.imageidentity
+      MAIN_COMPONENT: com.vhanma.biosonify.imageidentity/.MainActivity
+      APK_FILE: BioSonify-ImageIdentity-OneClick.apk
+      ANDROID_HOME: /usr/local/lib/android/sdk
+      ANDROID_SDK_ROOT: /usr/local/lib/android/sdk
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Expand checksum-locked Image Identity source
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat build_inputs/image-identity-v1.b64.part* > image-identity-overlay.b64
+          base64 -d image-identity-overlay.b64 > image-identity-overlay.zip
+          echo 'c0516a6e84815644211be277ac687dee17600daeb7dd1408374c53b8ab0d5375  image-identity-overlay.zip' | sha256sum -c -
+          unzip -o image-identity-overlay.zip
+          test -f lib/image-distinctiveness-engine.ts
+          test -f lib/distinct-image-loader.ts
+          test -f app/sonify.tsx
+          test -f scripts/smoke-image-distinctiveness.ts
+          test -f assets/images/identity-test.png
+          grep -q "'DISTINCT'" lib/image-distinctiveness-engine.ts
+          grep -q "'HARMONIOUS'" lib/image-distinctiveness-engine.ts
+          grep -q "'DATA'" lib/image-distinctiveness-engine.ts
+          grep -q "'ARCHIVE'" lib/image-distinctiveness-engine.ts
+          grep -q 'fixedRailShare: 0' lib/image-distinctiveness-engine.ts
+          grep -q 'Image Distinctiveness Engine' app/sonify.tsx
+          grep -q 'Debug / Proof Report' app/sonify.tsx
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - uses: pnpm/action-setup@v4
+        with:
+          version: '9.12.0'
+          run_install: false
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Install aligned Expo SDK 54 dependencies
+        shell: bash
+        run: |
+          set -o pipefail
+          pnpm install --no-frozen-lockfile 2>&1 | tee pnpm-install.log
+          test ${PIPESTATUS[0]} -eq 0
+          pnpm exec expo install --fix 2>&1 | tee expo-install-fix.log
+          test ${PIPESTATUS[0]} -eq 0
+          pnpm install --no-frozen-lockfile 2>&1 | tee -a pnpm-install.log
+          test ${PIPESTATUS[0]} -eq 0
+          pnpm exec expo install --check 2>&1 | tee expo-dependency-check.txt || true
+          cp package.json resolved-package.json
+
+      - name: Prove five-image distinctiveness and inherited engines
+        shell: bash
+        run: |
+          set -o pipefail
+          pnpm exec tsx scripts/smoke-image-distinctiveness.ts 2>&1 | tee image-distinctiveness-smoke.txt
+          test ${PIPESTATUS[0]} -eq 0
+          test "$(grep -c '^fixture=.*valid=true' image-distinctiveness-smoke.txt)" -eq 5
+          test "$(grep -c '^pair=.*valid=true' image-distinctiveness-smoke.txt)" -eq 10
+          grep -q 'identity_variety.*valid=true' image-distinctiveness-smoke.txt
+          grep -q 'one_pixel.*valid=true' image-distinctiveness-smoke.txt
+          grep -q 'archive_stems=10.*valid=true' image-distinctiveness-smoke.txt
+          pnpm exec tsx scripts/smoke-pixel-integrity.ts 2>&1 | tee pixel-integrity-smoke.txt
+          test ${PIPESTATUS[0]} -eq 0
+          grep -q 'valid=true' pixel-integrity-smoke.txt
+          pnpm exec tsx scripts/smoke-contact-engine.ts 2>&1 | tee contact-engine-smoke.txt
+          test ${PIPESTATUS[0]} -eq 0
+          test "$(grep -c 'valid=true' contact-engine-smoke.txt)" -ge 5
+
+      - name: Generate and build Android release
+        shell: bash
+        run: |
+          set -o pipefail
+          pnpm exec expo prebuild --platform android --clean 2>&1 | tee prebuild.log
+          test ${PIPESTATUS[0]} -eq 0
+          grep -R "applicationId.*${APP_PACKAGE}" android/app/build.gradle
+          grep '^reactNativeArchitectures=' android/gradle.properties | tee architecture-check.txt
+          grep 'arm64-v8a' architecture-check.txt
+          grep 'x86_64' architecture-check.txt
+          chmod +x android/gradlew
+          (cd android && ./gradlew :app:assembleRelease --no-daemon --stacktrace) 2>&1 | tee release-build.log
+          test ${PIPESTATUS[0]} -eq 0
+
+      - name: Verify package, label, signature and ABIs
+        shell: bash
+        run: |
+          set -euo pipefail
+          cp android/app/build/outputs/apk/release/app-release.apk "$APK_FILE"
+          APKSIGNER="$(find "$ANDROID_HOME/build-tools" -name apksigner -type f | sort -V | tail -1)"
+          AAPT="$(find "$ANDROID_HOME/build-tools" -name aapt -type f | sort -V | tail -1)"
+          "$APKSIGNER" verify --verbose --print-certs "$APK_FILE" | tee apk-signature.txt
+          "$AAPT" dump badging "$APK_FILE" | tee apk-badging.txt
+          unzip -l "$APK_FILE" | tee apk-files.txt
+          grep "package: name='${APP_PACKAGE}'" apk-badging.txt
+          grep "application-label:'BioSonify Image Identity'" apk-badging.txt
+          grep 'lib/arm64-v8a/' apk-files.txt
+          grep 'lib/x86_64/' apk-files.txt
+          sha256sum "$APK_FILE" > BioSonify-ImageIdentity-OneClick-SHA256.txt
+
+      - name: Boot Android 14 automation emulator
+        shell: bash
+        run: |
+          set -euo pipefail
+          export PATH="$ANDROID_HOME/platform-tools:$ANDROID_HOME/emulator:$ANDROID_HOME/cmdline-tools/latest/bin:$PATH"
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager "platform-tools" "emulator" "system-images;android-34;aosp_atd;x86_64"
+          sudo chmod 666 /dev/kvm
+          echo no | avdmanager create avd --force --name image_identity_test --package "system-images;android-34;aosp_atd;x86_64" --device "pixel_6"
+          emulator -avd image_identity_test -no-window -noaudio -no-boot-anim -no-snapshot -no-metrics -gpu swiftshader_indirect -camera-back none -camera-front none -memory 3072 > emulator-console.log 2>&1 &
+          adb wait-for-device
+          for i in $(seq 1 120); do
+            [ "$(adb shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')" = "1" ] && break
+            sleep 5
+          done
+          test "$(adb shell getprop sys.boot_completed | tr -d '\r')" = "1"
+          adb shell settings put global hide_error_dialogs 1 || true
+          adb shell settings put global show_first_crash_dialog 0 || true
+          adb shell settings put global window_animation_scale 0 || true
+          adb shell settings put global transition_animation_scale 0 || true
+          adb shell settings put global animator_duration_scale 0 || true
+          adb shell am force-stop com.android.launcher3 || true
+
+      - name: Install, launch and prove Image Identity UI
+        shell: bash
+        run: |
+          export PATH="$ANDROID_HOME/platform-tools:$PATH"
+          set +e
+          adb install -r "$APK_FILE" > install-result.txt 2>&1; INSTALL_CODE=$?
+          adb shell am force-stop "$APP_PACKAGE"
+          adb logcat -c
+          adb shell am start -W -S -n "$MAIN_COMPONENT" > activity-start-result.txt 2>&1; START_CODE=$?
+          sleep 18
+          adb shell pidof "$APP_PACKAGE" > process-id.txt 2>&1
+          adb shell dumpsys activity activities > activity-state.txt 2>&1
+          adb logcat -d -v threadtime > launch-log.txt 2>&1
+          adb exec-out screencap -p > home-screen.png 2>/dev/null
+          FAILED=0
+          [ "$INSTALL_CODE" -eq 0 ] || FAILED=1
+          [ "$START_CODE" -eq 0 ] || FAILED=1
+          [ -s process-id.txt ] || FAILED=1
+          grep -E "mResumedActivity|topResumedActivity" activity-state.txt | grep "$APP_PACKAGE" || FAILED=1
+          grep -E "FATAL EXCEPTION|Unable to start activity|Process: ${APP_PACKAGE}|ReactNativeJS:.*(TypeError|ReferenceError|Invariant Violation|Error:)" launch-log.txt && FAILED=1
+          [ "$FAILED" -eq 0 ] || exit 1
+
+          set -euo pipefail
+          adb shell am start -W -a android.intent.action.VIEW -d 'biosonifyimageidentity:///sonify?fixture=1' > deep-link-result.txt 2>&1
+          sleep 10
+          adb shell uiautomator dump /sdcard/identity.xml >/dev/null
+          adb pull /sdcard/identity.xml identity-ui.xml >/dev/null
+          grep -q 'Image Distinctiveness Engine' identity-ui.xml
+          grep -q 'Output mode' identity-ui.xml
+          grep -q 'Distinct' identity-ui.xml
+          grep -q 'Archive' identity-ui.xml
+          grep -q 'Analyze + Generate Identity' identity-ui.xml
+          adb exec-out screencap -p > identity-screen.png 2>/dev/null
+          test -n "$(adb shell pidof "$APP_PACKAGE" | tr -d '\r')"
+
+          SIZE="$(adb shell wm size | tail -1 | grep -oE '[0-9]+x[0-9]+')"
+          WIDTH="${SIZE%x*}"; HEIGHT="${SIZE#*x}"; Y=$((HEIGHT - 115))
+          for PERCENT in 8 25 42 58 75 92 8; do
+            adb shell input tap "$((WIDTH * PERCENT / 100))" "$Y"
+            sleep 3
+            test -n "$(adb shell pidof "$APP_PACKAGE" | tr -d '\r')"
+          done
+          adb shell dumpsys activity activities > navigation-activity-state.txt 2>&1
+          adb logcat -d -v threadtime > navigation-log.txt 2>&1
+          grep -E "mResumedActivity|topResumedActivity" navigation-activity-state.txt | grep "$APP_PACKAGE"
+          ! grep -E "FATAL EXCEPTION|Unable to start activity|Process: ${APP_PACKAGE}|ReactNativeJS:.*(TypeError|ReferenceError|Invariant Violation|Error:)" navigation-log.txt
+
+      - name: Upload proven APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: BioSonify-ImageIdentity-WORKING
+          path: |
+            BioSonify-ImageIdentity-OneClick.apk
+            BioSonify-ImageIdentity-OneClick-SHA256.txt
+            apk-badging.txt
+            apk-signature.txt
+            apk-files.txt
+            architecture-check.txt
+            resolved-package.json
+            image-distinctiveness-smoke.txt
+            pixel-integrity-smoke.txt
+            contact-engine-smoke.txt
+            release-build.log
+            launch-log.txt
+            navigation-log.txt
+            home-screen.png
+            identity-screen.png
+            identity-ui.xml
+            activity-start-result.txt
+            deep-link-result.txt
+            activity-state.txt
+            navigation-activity-state.txt
+            process-id.txt
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Upload diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: BioSonify-ImageIdentity-Diagnostics
+          path: |
+            pnpm-install.log
+            expo-install-fix.log
+            expo-dependency-check.txt
+            image-distinctiveness-smoke.txt
+            pixel-integrity-smoke.txt
+            contact-engine-smoke.txt
+            prebuild.log
+            release-build.log
+            emulator-console.log
+            install-result.txt
+            activity-start-result.txt
+            deep-link-result.txt
+            activity-state.txt
+            navigation-activity-state.txt
+            launch-log.txt
+            navigation-log.txt
+            home-screen.png
+            identity-screen.png
+            identity-ui.xml
+            process-id.txt
+          if-no-files-found: ignore
+          retention-days: 7
