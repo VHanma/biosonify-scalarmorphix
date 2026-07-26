@@ -201,15 +201,28 @@ jobs:
           [ "$FAILED" -eq 0 ] || exit 1
 
           set -euo pipefail
-          adb shell uiautomator dump /sdcard/creator.xml >/dev/null
-          adb pull /sdcard/creator.xml creator-ui.xml >/dev/null
-          grep -q 'Scalar Field Creator' creator-ui.xml
-          grep -q 'Field Pair Mode' creator-ui.xml
-          grep -q 'Information Encoding' creator-ui.xml
-          grep -q 'GENERATE SCALAR PATTERN' creator-ui.xml
+          adb shell uiautomator dump /sdcard/creator-top.xml >/dev/null
+          adb pull /sdcard/creator-top.xml creator-top.xml >/dev/null
+          grep -q 'Scalar Field Creator' creator-top.xml
+          grep -q 'Field Pair Mode' creator-top.xml
 
           SIZE="$(adb shell wm size | tail -1 | grep -oE '[0-9]+x[0-9]+')"
           WIDTH="${SIZE%x*}"; HEIGHT="${SIZE#*x}"; Y=$((HEIGHT - 115))
+          cp creator-top.xml creator-ui.xml
+          for I in 1 2 3 4 5 6 7 8; do
+            adb shell input swipe "$((WIDTH / 2))" "$((HEIGHT * 3 / 4))" "$((WIDTH / 2))" "$((HEIGHT / 4))" 450
+            sleep 2
+            adb shell uiautomator dump "/sdcard/creator-${I}.xml" >/dev/null
+            adb pull "/sdcard/creator-${I}.xml" "creator-${I}.xml" >/dev/null
+            cat "creator-${I}.xml" >> creator-ui.xml
+            test -n "$(adb shell pidof "$APP_PACKAGE" | tr -d '\r')"
+          done
+          grep -q 'Information Encoding' creator-ui.xml
+          grep -q 'GENERATE SCALAR PATTERN' creator-ui.xml
+          adb exec-out screencap -p > creator-bottom-screen.png 2>/dev/null
+
+          adb shell input keyevent KEYCODE_MOVE_HOME || true
+          sleep 2
           for PERCENT in 12 37 62 87 12; do
             adb shell input tap "$((WIDTH * PERCENT / 100))" "$Y"
             sleep 4
@@ -241,7 +254,10 @@ jobs:
             launch-log.txt
             navigation-log.txt
             creator-screen.png
+            creator-bottom-screen.png
             navigation-screen.png
+            creator-top.xml
+            creator-*.xml
             creator-ui.xml
             activity-start-result.txt
             activity-state.txt
@@ -273,7 +289,10 @@ jobs:
             launch-log.txt
             navigation-log.txt
             creator-screen.png
+            creator-bottom-screen.png
             navigation-screen.png
+            creator-top.xml
+            creator-*.xml
             creator-ui.xml
             process-id.txt
           if-no-files-found: ignore
