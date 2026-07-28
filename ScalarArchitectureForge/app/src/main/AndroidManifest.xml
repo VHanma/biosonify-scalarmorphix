@@ -2,7 +2,7 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <application
         android:allowBackup="true"
-        android:label="Bio-Informational Transfer Forge"
+        android:label="Bio-Informational Transfer Forge v2.1"
         android:supportsRtl="true"
         android:theme="@style/AppTheme">
         <activity
