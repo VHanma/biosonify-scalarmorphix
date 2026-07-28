@@ -1,9 +1,9 @@
-name: Build Scalar Architecture Forge APK
+name: Build Bio-Informational Transfer Forge APK
 
 on:
   push:
     branches:
-      - scalar-architecture-forge-apk
+      - scalar-bio-transfer-forge-v2
     paths:
       - 'ScalarArchitectureForge/**'
       - '.github/workflows/build-scalar-architecture-forge.yml'
@@ -46,11 +46,11 @@ jobs:
         run: gradle --no-daemon assembleDebug
 
       - name: Rename APK
-        run: cp ScalarArchitectureForge/app/build/outputs/apk/debug/app-debug.apk Scalar-Architecture-Forge-v1.0.apk
+        run: cp ScalarArchitectureForge/app/build/outputs/apk/debug/app-debug.apk Bio-Informational-Transfer-Forge-v2.0.apk
 
       - name: Upload one-click APK
         uses: actions/upload-artifact@v4
         with:
-          name: Scalar-Architecture-Forge-v1.0-APK
-          path: Scalar-Architecture-Forge-v1.0.apk
+          name: Bio-Informational-Transfer-Forge-v2.0-APK
+          path: Bio-Informational-Transfer-Forge-v2.0.apk
           if-no-files-found: error
