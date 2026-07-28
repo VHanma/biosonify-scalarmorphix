@@ -6,15 +6,19 @@
         android:supportsRtl="true"
         android:theme="@style/AppTheme">
         <activity
-            android:name=".EngineeringActivity"
+            android:name="com.vhanma.scalararchitectureforge.ScalarWaveCreatorActivity"
             android:exported="false"
             android:screenOrientation="portrait" />
         <activity
-            android:name=".MainActivity"
+            android:name="com.vhanma.scalararchitectureforge.EngineeringActivity"
             android:exported="false"
             android:screenOrientation="portrait" />
         <activity
-            android:name=".HubActivity"
+            android:name="com.vhanma.scalararchitectureforge.MainActivity"
+            android:exported="false"
+            android:screenOrientation="portrait" />
+        <activity
+            android:name="com.vhanma.scalararchitectureforge.HubActivity"
             android:exported="true"
             android:screenOrientation="portrait">
             <intent-filter>
