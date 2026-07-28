@@ -7,6 +7,12 @@ on:
     paths:
       - 'ScalarPhaseForge/**'
       - '.github/workflows/build-scalar-phase-forge.yml'
+  pull_request:
+    branches:
+      - main
+    paths:
+      - 'ScalarPhaseForge/**'
+      - '.github/workflows/build-scalar-phase-forge.yml'
   workflow_dispatch:
 
 jobs:
