@@ -46,11 +46,11 @@ jobs:
         run: gradle --no-daemon assembleDebug
 
       - name: Rename APK
-        run: cp ScalarArchitectureForge/app/build/outputs/apk/debug/app-debug.apk Bio-Informational-Transfer-Forge-v2.0.apk
+        run: cp ScalarArchitectureForge/app/build/outputs/apk/debug/app-debug.apk Bio-Informational-Transfer-Forge-v2.1.apk
 
       - name: Upload one-click APK
         uses: actions/upload-artifact@v4
         with:
-          name: Bio-Informational-Transfer-Forge-v2.0-APK
-          path: Bio-Informational-Transfer-Forge-v2.0.apk
+          name: Bio-Informational-Transfer-Forge-v2.1-APK
+          path: Bio-Informational-Transfer-Forge-v2.1.apk
           if-no-files-found: error
