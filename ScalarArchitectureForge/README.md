@@ -2,8 +2,8 @@
 
 Standalone Android application containing the Scalar Wave Creator, Scalar Architecture Forge, and engineering blueprint laboratory.
 
-- App name: **Bio-Informational Transfer Forge**
-- Package / application ID: `com.vhanma.biotransferforge`
+- App name: **Bio-Informational Transfer Forge v2.1**
+- Separate package / application ID: `com.vhanma.biotransferforgev21`
 - Existing BioSonify, Scalar Phase Forge, Scalar Architecture Forge, and Bio-Informational Transfer Forge 2.0 APKs are not replaced or modified.
 
 ## Scalar Wave Creator
