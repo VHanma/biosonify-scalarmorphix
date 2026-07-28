@@ -1,10 +1,20 @@
-# Bio-Informational Transfer Forge 2.0
+# Bio-Informational Transfer Forge 2.1
 
-Standalone Android clone containing the complete Scalar Architecture Forge plus an engineering blueprint laboratory.
+Standalone Android application containing the Scalar Wave Creator, Scalar Architecture Forge, and engineering blueprint laboratory.
 
 - App name: **Bio-Informational Transfer Forge**
 - Package / application ID: `com.vhanma.biotransferforge`
-- Existing BioSonify, Scalar Phase Forge, and Scalar Architecture Forge APKs are not replaced or modified.
+- Existing BioSonify, Scalar Phase Forge, Scalar Architecture Forge, and Bio-Informational Transfer Forge 2.0 APKs are not replaced or modified.
+
+## Scalar Wave Creator
+
+- Generates an original waveform without requiring an imported file.
+- Sine, harmonic stack, soliton packet, square, triangle, saw, and pulse sources.
+- Phase-conjugate analogue, 180-degree anti-phase, counter-rotating, and standing-wave hybrid pairs.
+- Adjustable carrier, message frequency, longitudinal envelope, modulation depth, presence, pulse duty, harmonic decay, duration, and comma-separated harmonic layers.
+- One-tap Bearden Pair, 7.83/432, and DNA Stack presets.
+- Forward, conjugate, vector-sum, longitudinal-envelope, and pressure-density visual panels.
+- Lossless 48 kHz stereo WAV and JSON settings export.
 
 ## Scalar Architecture Forge
 
@@ -47,4 +57,4 @@ Standalone Android clone containing the complete Scalar Architecture Forge plus 
 - Selenite, smoky quartz, moldavite, dielectric, and plasmonic-interface planning fields.
 - Post-exposure baseline, biological, cognitive, and performance logging guidance.
 
-The phone speaker is used only for the original audible monitor path. A 100–205 kHz hardware carrier is represented by exported timing/profile data rather than falsely claimed as phone-speaker output. All physical-field and biological effects in the supplied blueprint remain experimental hypotheses rather than app-certified outcomes.
+The phone speaker is used only for audible monitor paths. A 100–205 kHz hardware carrier is represented by exported timing/profile data rather than treated as phone-speaker output. The wave creator is an audio-domain paired-wave simulation and visualization system.
