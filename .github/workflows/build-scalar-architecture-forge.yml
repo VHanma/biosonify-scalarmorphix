@@ -1,0 +1,56 @@
+name: Build Scalar Architecture Forge APK
+
+on:
+  push:
+    branches:
+      - scalar-architecture-forge-apk
+    paths:
+      - 'ScalarArchitectureForge/**'
+      - '.github/workflows/build-scalar-architecture-forge.yml'
+  pull_request:
+    branches:
+      - main
+    paths:
+      - 'ScalarArchitectureForge/**'
+      - '.github/workflows/build-scalar-architecture-forge.yml'
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout branch
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android SDK packages
+        run: sdkmanager "platforms;android-35" "build-tools;35.0.0"
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.13'
+
+      - name: Build standalone debug APK
+        working-directory: ScalarArchitectureForge
+        run: gradle --no-daemon assembleDebug
+
+      - name: Rename APK
+        run: cp ScalarArchitectureForge/app/build/outputs/apk/debug/app-debug.apk Scalar-Architecture-Forge-v1.0.apk
+
+      - name: Upload one-click APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: Scalar-Architecture-Forge-v1.0-APK
+          path: Scalar-Architecture-Forge-v1.0.apk
+          if-no-files-found: error
