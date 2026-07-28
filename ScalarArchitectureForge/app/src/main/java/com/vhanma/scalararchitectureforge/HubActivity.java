@@ -50,16 +50,29 @@ public final class HubActivity extends Activity {
         root.addView(title);
 
         TextView subtitle = text(
-                "Scalar architecture audio forge + bifilar and caduceus engineering blueprint lab",
+                "Scalar Wave Creator + architecture forge + bifilar and caduceus engineering lab",
                 14, MUTED, false);
         subtitle.setPadding(0, dp(6), 0, dp(16));
         root.addView(subtitle);
 
+        LinearLayout creatorCard = card();
+        root.addView(creatorCard, marginTop(0));
+        creatorCard.addView(text("SCALAR WAVE CREATOR", 18, GOLD, true));
+        TextView creatorText = text(
+                "Generate a paired wave from nothing. Choose sine, harmonic, soliton, square, triangle, saw, or pulse; set the carrier, envelope, modulation, layers, phase architecture, duration, and export a lossless stereo WAV.",
+                13, TEXT, false);
+        creatorText.setPadding(0, dp(8), 0, dp(12));
+        creatorCard.addView(creatorText);
+        Button openCreator = button("OPEN SCALAR WAVE CREATOR", GOLD, Color.rgb(48, 38, 8));
+        openCreator.setOnClickListener(v -> startActivity(
+                new Intent(this, ScalarWaveCreatorActivity.class)));
+        creatorCard.addView(openCreator, height(dp(60)));
+
         LinearLayout forgeCard = card();
-        root.addView(forgeCard, marginTop(0));
+        root.addView(forgeCard, marginTop(dp(13)));
         forgeCard.addView(text("SCALAR ARCHITECTURE FORGE", 17, MINT, true));
         TextView forgeText = text(
-                "Image, audio, and text encoding. 144-code map, 15 dimensional bands, custom ratios, phase-conjugate stereo WAV, animated visualizer, and JSON report.",
+                "Import image, audio, or text. Build the 144-code map, 15 dimensional bands, custom ratios, phase-conjugate stereo WAV, animated visualizer, and JSON report.",
                 13, TEXT, false);
         forgeText.setPadding(0, dp(8), 0, dp(12));
         forgeCard.addView(forgeText);
@@ -81,15 +94,17 @@ public final class HubActivity extends Activity {
 
         LinearLayout splitCard = card();
         root.addView(splitCard, marginTop(dp(13)));
-        splitCard.addView(text("TWO OUTPUT PATHS", 15, GOLD, true));
+        splitCard.addView(text("THREE WORKING PATHS", 15, GOLD, true));
         TextView splitText = text(
-                "PHONE PATH\nAudible monitor, phase-pair WAV, waveform and code visualization.\n\nEXTERNAL-HARDWARE PATH\nMicrosecond TTL event sequence and complete generator profile export for a separate function generator or controller. The phone does not pretend its speaker is producing a 100–205 kHz carrier.",
+                "PURE WAVE CREATOR\nBuild an original paired audio waveform without importing a file.\n\n"
+                        + "INFORMATION FORGE\nTranslate image, audio, and text patterns into a phase-pair WAV and code map.\n\n"
+                        + "EXTERNAL-HARDWARE LAB\nExport microsecond TTL events and generator profiles for a separate function generator or controller. The phone does not pretend its speaker is producing a 100–205 kHz carrier.",
                 13, TEXT, false);
         splitText.setPadding(0, dp(8), 0, 0);
         splitCard.addView(splitText);
 
         TextView note = text(
-                "This app implements the supplied blueprint as an experimental design, simulation, encoding, visualization, and logging system. Biological and non-Hertzian effects remain hypotheses to be tested rather than app-certified outcomes.",
+                "The wave creator and architecture forge are audio-domain simulations and visualization tools. The engineering lab stores and exports the supplied experimental hardware design without certifying biological or non-Hertzian outcomes.",
                 12, MUTED, false);
         note.setPadding(0, dp(14), 0, 0);
         root.addView(note);
