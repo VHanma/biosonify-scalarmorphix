@@ -1,0 +1,66 @@
+name: Build Scalar Audio Forge APK
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'build_inputs/ScalarAudioForge/**'
+      - '.github/workflows/build-scalar-audio-forge.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-apk:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    env:
+      CI: '1'
+      GRADLE_OPTS: '-Dorg.gradle.daemon=false -Dorg.gradle.jvmargs=-Xmx3g'
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android 37 platform
+        run: sdkmanager 'platforms;android-37' 'build-tools;36.0.0'
+
+      - name: Set up Gradle 9.5
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '9.5.0'
+
+      - name: Restore Scalar Audio Forge project
+        run: |
+          mkdir -p /tmp/scalar-forge
+          cat build_inputs/ScalarAudioForge/part-* > /tmp/ScalarAudioForge.zip.b64
+          base64 -d /tmp/ScalarAudioForge.zip.b64 > /tmp/ScalarAudioForge.zip
+          unzip -q /tmp/ScalarAudioForge.zip -d /tmp/scalar-forge
+
+      - name: Compile installable APK
+        working-directory: /tmp/scalar-forge/ScalarAudioForge
+        run: gradle :app:assembleDebug --stacktrace
+
+      - name: Name and hash APK
+        run: |
+          cp /tmp/scalar-forge/ScalarAudioForge/app/build/outputs/apk/debug/app-debug.apk ScalarAudioForge-OneClick.apk
+          sha256sum ScalarAudioForge-OneClick.apk > ScalarAudioForge-OneClick-SHA256.txt
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: ScalarAudioForge-OneClick
+          path: |
+            ScalarAudioForge-OneClick.apk
+            ScalarAudioForge-OneClick-SHA256.txt
+          if-no-files-found: error
+          retention-days: 30
