@@ -61,7 +61,7 @@ class MainActivity : Activity() {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(18), dp(34), dp(18), dp(36))
         }
-        scroll.addView(root, ScrollView.LayoutParams(-1, -2))
+        scroll.addView(root)
 
         root.addView(label("SCALAR AUDIO FORGE", 27f, Color.WHITE).apply { setTypeface(typeface, 1) })
         root.addView(label("Converter + stackable experimental DSP workstation", 14f, Color.rgb(170, 175, 194)))
