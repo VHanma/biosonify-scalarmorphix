@@ -20,15 +20,18 @@ jobs:
           distribution: temurin
           java-version: '17'
 
-      - name: Gradle 8.9
-        uses: gradle/actions/setup-gradle@v4
-        with:
-          gradle-version: '8.9'
+      - name: Android command-line tools
+        uses: android-actions/setup-android@v3
 
       - name: Android SDK 36
         run: |
           yes | sdkmanager --licenses >/dev/null || true
           sdkmanager 'platforms;android-36' 'build-tools;35.0.0'
+
+      - name: Gradle 8.9
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
 
       - name: Compile installable APK
         run: gradle -p scalar-audio-forge :app:assembleDebug --stacktrace
