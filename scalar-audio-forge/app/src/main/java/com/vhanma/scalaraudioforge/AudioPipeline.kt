@@ -9,15 +9,16 @@ import android.media.MediaFormat
 import android.media.MediaMuxer
 import android.net.Uri
 import android.os.Build
-import java.io.File
-import java.io.RandomAccessFile
+import android.os.ParcelFileDescriptor
+import java.io.FileOutputStream
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
+import java.nio.channels.FileChannel
 import kotlin.math.min
 
 object AudioPipeline {
     data class Result(
-        val file: File,
+        val uri: Uri,
         val sampleRate: Int,
         val channels: Int,
         val frames: Long,
@@ -27,7 +28,7 @@ object AudioPipeline {
     fun process(
         context: Context,
         source: Uri,
-        destination: File,
+        destination: Uri,
         matrix: ForgeMatrix,
         outputFormat: OutputFormat,
         callback: (progress: Float, preview: FloatArray?) -> Unit
@@ -38,7 +39,7 @@ object AudioPipeline {
         var inputFormat: MediaFormat? = null
         for (i in 0 until extractor.trackCount) {
             val f = extractor.getTrackFormat(i)
-            val mime = f.getString(MediaFormat.KEY_MIME) ?: ""
+            val mime = f.getString(MediaFormat.KEY_MIME).orEmpty()
             if (mime.startsWith("audio/")) {
                 track = i
                 inputFormat = f
@@ -47,22 +48,35 @@ object AudioPipeline {
         }
         require(track >= 0 && inputFormat != null) { "No decodable audio track found" }
         extractor.selectTrack(track)
+
         val format = inputFormat!!
         val mime = format.getString(MediaFormat.KEY_MIME) ?: error("Audio MIME missing")
         val sampleRate = format.getInteger(MediaFormat.KEY_SAMPLE_RATE)
-        val channels = format.getInteger(MediaFormat.KEY_CHANNEL_COUNT)
+        val inputChannels = format.getInteger(MediaFormat.KEY_CHANNEL_COUNT)
+        val outputChannels = MatrixEngine.outputChannels(inputChannels, matrix)
         val durationUs = if (format.containsKey(MediaFormat.KEY_DURATION)) format.getLong(MediaFormat.KEY_DURATION) else 0L
 
         val decoder = MediaCodec.createDecoderByType(mime)
         decoder.configure(format, null, null, 0)
         decoder.start()
-        val writer: SampleWriter = when (outputFormat) {
-            OutputFormat.WAV16,
-            OutputFormat.WAV24,
-            OutputFormat.WAV_FLOAT32,
-            OutputFormat.RF64 -> WavFileWriter(destination, sampleRate, channels, outputFormat)
-            OutputFormat.AAC_M4A,
-            OutputFormat.OPUS_OGG -> EncodedAudioWriter(destination, sampleRate, channels, outputFormat)
+
+        val pfd = context.contentResolver.openFileDescriptor(destination, "rwt")
+            ?: error("The selected destination could not be opened for direct streaming")
+        val writer: SampleWriter = try {
+            when (outputFormat) {
+                OutputFormat.WAV16,
+                OutputFormat.WAV24,
+                OutputFormat.WAV_FLOAT32,
+                OutputFormat.RF64 -> WavFileWriter(pfd, sampleRate, outputChannels, outputFormat)
+                OutputFormat.AAC_M4A,
+                OutputFormat.OPUS_OGG -> EncodedAudioWriter(pfd, sampleRate, outputChannels, outputFormat)
+            }
+        } catch (t: Throwable) {
+            runCatching { pfd.close() }
+            runCatching { decoder.stop() }
+            decoder.release()
+            extractor.release()
+            throw t
         }
 
         val info = MediaCodec.BufferInfo()
@@ -104,15 +118,18 @@ object AudioPipeline {
                             raw.position(info.offset)
                             raw.limit(info.offset + info.size)
                             val pcm = toFloatPcm(raw.slice().order(ByteOrder.LITTLE_ENDIAN), outputEncoding)
-                            val processed = MatrixEngine.process(pcm, channels, sampleRate, frameStart, matrix)
+                            val processed = MatrixEngine.process(pcm, inputChannels, sampleRate, frameStart, matrix)
                             writer.write(processed)
-                            frameStart += processed.size / channels
-                            val percent = if (durationUs > 0) {
+                            frameStart += pcm.size / inputChannels
+
+                            val percent = if (durationUs > 0L) {
                                 ((info.presentationTimeUs * 100L / durationUs).toInt()).coerceIn(0, 100)
                             } else 0
-                            if (percent != lastProgress && percent % 2 == 0) {
+                            if (percent != lastProgress && (percent % 2 == 0 || percent == 100)) {
                                 lastProgress = percent
-                                callback(percent / 100f, processed.take(min(processed.size, 8192)).toFloatArray())
+                                val previewSize = min(processed.size, 4096)
+                                val preview = if (previewSize > 0) processed.copyOfRange(0, previewSize) else null
+                                callback(percent / 100f, preview)
                             }
                         }
                         outputDone = (info.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM) != 0
@@ -126,39 +143,38 @@ object AudioPipeline {
             decoder.release()
             extractor.release()
         }
+
         callback(1f, null)
-        return Result(destination, sampleRate, channels, frameStart, outputFormat)
+        return Result(destination, sampleRate, outputChannels, frameStart, outputFormat)
     }
 
-    private fun toFloatPcm(buffer: ByteBuffer, encoding: Int): FloatArray {
-        return when (encoding) {
-            AudioFormat.ENCODING_PCM_FLOAT -> {
-                val count = buffer.remaining() / 4
-                FloatArray(count) { buffer.float.coerceIn(-1f, 1f) }
+    private fun toFloatPcm(buffer: ByteBuffer, encoding: Int): FloatArray = when (encoding) {
+        AudioFormat.ENCODING_PCM_FLOAT -> {
+            val count = buffer.remaining() / 4
+            FloatArray(count) { buffer.float.coerceIn(-1f, 1f) }
+        }
+        AudioFormat.ENCODING_PCM_8BIT -> {
+            val count = buffer.remaining()
+            FloatArray(count) { ((buffer.get().toInt() and 0xff) - 128) / 128f }
+        }
+        AudioFormat.ENCODING_PCM_24BIT_PACKED -> {
+            val count = buffer.remaining() / 3
+            FloatArray(count) {
+                val b0 = buffer.get().toInt() and 0xff
+                val b1 = buffer.get().toInt() and 0xff
+                val b2 = buffer.get().toInt() and 0xff
+                var v = b0 or (b1 shl 8) or (b2 shl 16)
+                if ((v and 0x800000) != 0) v = v or -0x1000000
+                (v / 8388608f).coerceIn(-1f, 1f)
             }
-            AudioFormat.ENCODING_PCM_8BIT -> {
-                val count = buffer.remaining()
-                FloatArray(count) { ((buffer.get().toInt() and 0xff) - 128) / 128f }
-            }
-            AudioFormat.ENCODING_PCM_24BIT_PACKED -> {
-                val count = buffer.remaining() / 3
-                FloatArray(count) {
-                    val b0 = buffer.get().toInt() and 0xff
-                    val b1 = buffer.get().toInt() and 0xff
-                    val b2 = buffer.get().toInt() and 0xff
-                    var v = b0 or (b1 shl 8) or (b2 shl 16)
-                    if ((v and 0x800000) != 0) v = v or -0x1000000
-                    (v / 8388608f).coerceIn(-1f, 1f)
-                }
-            }
-            AudioFormat.ENCODING_PCM_32BIT -> {
-                val count = buffer.remaining() / 4
-                FloatArray(count) { (buffer.int / 2147483648.0).toFloat().coerceIn(-1f, 1f) }
-            }
-            else -> {
-                val count = buffer.remaining() / 2
-                FloatArray(count) { buffer.short / 32768f }
-            }
+        }
+        AudioFormat.ENCODING_PCM_32BIT -> {
+            val count = buffer.remaining() / 4
+            FloatArray(count) { (buffer.int / 2147483648.0).toFloat().coerceIn(-1f, 1f) }
+        }
+        else -> {
+            val count = buffer.remaining() / 2
+            FloatArray(count) { buffer.short / 32768f }
         }
     }
 }
@@ -169,12 +185,12 @@ private interface SampleWriter {
 }
 
 private class WavFileWriter(
-    file: File,
+    private val pfd: ParcelFileDescriptor,
     private val sampleRate: Int,
     private val channels: Int,
     private val format: OutputFormat
 ) : SampleWriter {
-    private val raf = RandomAccessFile(file, "rw")
+    private val channel: FileChannel = FileOutputStream(pfd.fileDescriptor).channel
     private var dataBytes = 0L
     private var frames = 0L
     private val rf64 = format == OutputFormat.RF64
@@ -187,8 +203,9 @@ private class WavFileWriter(
     private val bitsPerSample = bytesPerSample * 8
 
     init {
-        raf.setLength(0)
-        if (rf64) writeRf64Header() else writeRiffHeader()
+        channel.truncate(0)
+        channel.position(0)
+        writeBuffer(if (rf64) rf64Header() else riffHeader())
     }
 
     override fun write(samples: FloatArray) {
@@ -214,84 +231,98 @@ private class WavFileWriter(
                 bytes[p++] = ((v ushr 8) and 0xff).toByte()
             }
         }
+
         if (!rf64 && dataBytes + bytes.size > 0xffffffffL) {
-            throw IllegalStateException("RIFF WAV exceeded 4 GB. Select RF64 for very large exports.")
+            throw IllegalStateException("RIFF WAV exceeded 4 GB. Choose RF64 for a giant PCM export.")
         }
-        raf.write(bytes)
+        writeBuffer(ByteBuffer.wrap(bytes))
         dataBytes += bytes.size
         frames += samples.size / channels
     }
 
     override fun close() {
-        if (rf64) {
-            raf.seek(20)
-            writeLongLE(raf.length() - 8)
-            writeLongLE(dataBytes)
-            writeLongLE(frames)
-        } else {
-            raf.seek(4)
-            writeIntLE((raf.length() - 8).toInt())
-            raf.seek(40)
-            writeIntLE(dataBytes.toInt())
+        runCatching {
+            if (rf64) {
+                writeLongAt(20L, channel.size() - 8L)
+                writeLongAt(28L, dataBytes)
+                writeLongAt(36L, frames)
+            } else {
+                writeIntAt(4L, (channel.size() - 8L).toInt())
+                writeIntAt(40L, dataBytes.toInt())
+            }
+            channel.force(true)
         }
-        raf.close()
+        runCatching { channel.close() }
+        runCatching { pfd.close() }
     }
 
-    private fun writeRiffHeader() {
-        raf.writeBytes("RIFF")
-        writeIntLE(0)
-        raf.writeBytes("WAVE")
-        writeFmt()
-        raf.writeBytes("data")
-        writeIntLE(0)
-    }
-
-    private fun writeRf64Header() {
-        raf.writeBytes("RF64")
-        writeIntLE(-1)
-        raf.writeBytes("WAVE")
-        raf.writeBytes("ds64")
-        writeIntLE(28)
-        writeLongLE(0L)
-        writeLongLE(0L)
-        writeLongLE(0L)
-        writeIntLE(0)
-        writeFmt()
-        raf.writeBytes("data")
-        writeIntLE(-1)
-    }
-
-    private fun writeFmt() {
+    private fun riffHeader(): ByteBuffer {
         val blockAlign = channels * bytesPerSample
-        raf.writeBytes("fmt ")
-        writeIntLE(16)
-        writeShortLE(audioFormatCode)
-        writeShortLE(channels)
-        writeIntLE(sampleRate)
-        writeIntLE(sampleRate * blockAlign)
-        writeShortLE(blockAlign)
-        writeShortLE(bitsPerSample)
+        return ByteBuffer.allocate(44).order(ByteOrder.LITTLE_ENDIAN).apply {
+            put("RIFF".toByteArray(Charsets.US_ASCII))
+            putInt(0)
+            put("WAVE".toByteArray(Charsets.US_ASCII))
+            put("fmt ".toByteArray(Charsets.US_ASCII))
+            putInt(16)
+            putShort(audioFormatCode.toShort())
+            putShort(channels.toShort())
+            putInt(sampleRate)
+            putInt(sampleRate * blockAlign)
+            putShort(blockAlign.toShort())
+            putShort(bitsPerSample.toShort())
+            put("data".toByteArray(Charsets.US_ASCII))
+            putInt(0)
+            flip()
+        }
     }
 
-    private fun writeShortLE(v: Int) {
-        raf.write(v and 0xff)
-        raf.write((v ushr 8) and 0xff)
+    private fun rf64Header(): ByteBuffer {
+        val blockAlign = channels * bytesPerSample
+        return ByteBuffer.allocate(80).order(ByteOrder.LITTLE_ENDIAN).apply {
+            put("RF64".toByteArray(Charsets.US_ASCII))
+            putInt(-1)
+            put("WAVE".toByteArray(Charsets.US_ASCII))
+            put("ds64".toByteArray(Charsets.US_ASCII))
+            putInt(28)
+            putLong(0L)
+            putLong(0L)
+            putLong(0L)
+            putInt(0)
+            put("fmt ".toByteArray(Charsets.US_ASCII))
+            putInt(16)
+            putShort(1)
+            putShort(channels.toShort())
+            putInt(sampleRate)
+            putInt(sampleRate * blockAlign)
+            putShort(blockAlign.toShort())
+            putShort(16)
+            put("data".toByteArray(Charsets.US_ASCII))
+            putInt(-1)
+            flip()
+        }
     }
 
-    private fun writeIntLE(v: Int) {
-        raf.write(v and 0xff)
-        raf.write((v ushr 8) and 0xff)
-        raf.write((v ushr 16) and 0xff)
-        raf.write((v ushr 24) and 0xff)
+    private fun writeBuffer(buffer: ByteBuffer) {
+        while (buffer.hasRemaining()) channel.write(buffer)
     }
 
-    private fun writeLongLE(v: Long) {
-        for (i in 0 until 8) raf.write(((v ushr (8 * i)) and 0xff).toInt())
+    private fun writeIntAt(position: Long, value: Int) {
+        val old = channel.position()
+        channel.position(position)
+        writeBuffer(ByteBuffer.allocate(4).order(ByteOrder.LITTLE_ENDIAN).putInt(value).apply { flip() })
+        channel.position(old)
+    }
+
+    private fun writeLongAt(position: Long, value: Long) {
+        val old = channel.position()
+        channel.position(position)
+        writeBuffer(ByteBuffer.allocate(8).order(ByteOrder.LITTLE_ENDIAN).putLong(value).apply { flip() })
+        channel.position(old)
     }
 }
 
 private class EncodedAudioWriter(
-    file: File,
+    private val pfd: ParcelFileDescriptor,
     private val sampleRate: Int,
     private val channels: Int,
     private val outputFormat: OutputFormat
@@ -306,7 +337,7 @@ private class EncodedAudioWriter(
     private val bytesPerFrame = channels * 2
 
     init {
-        require(channels in 1..2) { "AAC/Opus export currently supports mono or stereo audio" }
+        require(channels in 1..2) { "AAC/Opus export supports mono or stereo output" }
         mime = when (outputFormat) {
             OutputFormat.AAC_M4A -> MediaFormat.MIMETYPE_AUDIO_AAC
             OutputFormat.OPUS_OGG -> {
@@ -315,7 +346,7 @@ private class EncodedAudioWriter(
             }
             else -> error("Compressed writer received a PCM format")
         }
-        val format = MediaFormat.createAudioFormat(mime, sampleRate, channels).apply {
+        val mediaFormat = MediaFormat.createAudioFormat(mime, sampleRate, channels).apply {
             setInteger(MediaFormat.KEY_MAX_INPUT_SIZE, 32768)
             when (outputFormat) {
                 OutputFormat.AAC_M4A -> {
@@ -327,10 +358,10 @@ private class EncodedAudioWriter(
             }
         }
         codec = MediaCodec.createEncoderByType(mime)
-        codec.configure(format, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE)
+        codec.configure(mediaFormat, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE)
         codec.start()
         muxer = MediaMuxer(
-            file.absolutePath,
+            pfd.fileDescriptor,
             if (outputFormat == OutputFormat.AAC_M4A) MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4
             else MediaMuxer.OutputFormat.MUXER_OUTPUT_OGG
         )
@@ -372,6 +403,7 @@ private class EncodedAudioWriter(
         codec.release()
         if (muxerStarted) runCatching { muxer.stop() }
         muxer.release()
+        runCatching { pfd.close() }
     }
 
     private fun drain(endOfStream: Boolean) {
@@ -405,13 +437,13 @@ private class EncodedAudioWriter(
     }
 
     private fun pcm16(samples: FloatArray): ByteArray {
-        val bytes = ByteArray(samples.size * 2)
+        val out = ByteArray(samples.size * 2)
         var p = 0
-        samples.forEach { value ->
-            val v = (value.coerceIn(-1f, 1f) * 32767f).toInt().toShort().toInt()
-            bytes[p++] = (v and 0xff).toByte()
-            bytes[p++] = ((v ushr 8) and 0xff).toByte()
+        samples.forEach { sample ->
+            val v = (sample.coerceIn(-1f, 1f) * 32767f).toInt().toShort().toInt()
+            out[p++] = (v and 0xff).toByte()
+            out[p++] = ((v ushr 8) and 0xff).toByte()
         }
-        return bytes
+        return out
     }
 }

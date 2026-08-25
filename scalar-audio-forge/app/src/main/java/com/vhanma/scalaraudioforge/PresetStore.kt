@@ -7,13 +7,9 @@ import org.json.JSONObject
 class PresetStore(context: Context) {
     private val prefs = context.getSharedPreferences("forge_presets", Context.MODE_PRIVATE)
 
-    fun save(name: String, transforms: List<TransformSpec>) {
+    fun save(name: String, state: PresetDna.State) {
         val root = readRoot()
-        val arr = JSONArray()
-        transforms.forEach {
-            arr.put(JSONObject().put("kind", it.kind.name).put("amount", it.amount.toDouble()))
-        }
-        root.put(name, arr)
+        root.put(name, PresetDna.encode(state))
         prefs.edit().putString("presets", root.toString()).apply()
     }
 
@@ -25,15 +21,26 @@ class PresetStore(context: Context) {
         return out.sorted()
     }
 
-    fun load(name: String): List<TransformSpec> {
-        val arr = readRoot().optJSONArray(name) ?: return emptyList()
-        val out = mutableListOf<TransformSpec>()
+    fun load(name: String): PresetDna.State {
+        val root = readRoot()
+        val value = root.opt(name) ?: return PresetDna.State(emptyList(), ForgeMatrix())
+        if (value is String && (value.startsWith("SAF3:") || value.startsWith("SAF2:"))) {
+            return runCatching { PresetDna.decode(value) }
+                .getOrElse { PresetDna.State(emptyList(), ForgeMatrix()) }
+        }
+
+        // Backward compatibility with 1.0/1.1 presets stored as JSON arrays.
+        val arr = value as? JSONArray ?: return PresetDna.State(emptyList(), ForgeMatrix())
+        val transforms = mutableListOf<TransformSpec>()
         for (i in 0 until arr.length()) {
             val obj = arr.optJSONObject(i) ?: continue
             val kind = runCatching { TransformKind.valueOf(obj.getString("kind")) }.getOrNull() ?: continue
-            out += TransformSpec(kind, obj.optDouble("amount", .35).toFloat().coerceIn(0f, 1f))
+            transforms += TransformSpec(kind)
         }
-        return out
+        return PresetDna.State(
+            stack = transforms,
+            matrix = ForgeMatrix(enabled = false, master = transforms)
+        )
     }
 
     fun delete(name: String) {

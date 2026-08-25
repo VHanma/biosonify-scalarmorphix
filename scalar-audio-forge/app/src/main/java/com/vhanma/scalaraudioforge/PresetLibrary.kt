@@ -1,23 +1,112 @@
 package com.vhanma.scalaraudioforge
 
 object PresetLibrary {
-    private fun t(kind: TransformKind, amount: Float = 0.35f) = TransformSpec(kind, amount)
+    private fun t(kind: TransformKind) = TransformSpec(kind)
 
     val quick = listOf(
-        ForgePreset("Convert Only", "No experimental transform. Decode and export the audio unchanged as PCM WAV/RF64.", emptyList()),
-        ForgePreset("Puharich Core", "8 Hz envelope with a 256 Hz reference layer.", listOf(t(TransformKind.PUHARICH_8, .40f), t(TransformKind.CONTROL_256, .18f))),
-        ForgePreset("Schumann + Puharich", "7.83 Hz and 8 Hz envelopes with the 256 Hz reference layer.", listOf(t(TransformKind.SCHUMANN_783, .25f), t(TransformKind.PUHARICH_8, .25f), t(TransformKind.CONTROL_256, .12f))),
-        ForgePreset("Gateway-Puharich", "Stereo 252/260 Hz difference pair plus a gentle 8 Hz envelope.", listOf(t(TransformKind.GATEWAY_STEREO, .25f), t(TransformKind.PUHARICH_8, .25f))),
-        ForgePreset("Tesla-Meyl-Puharich", "Harmonic carriers, stereo phase rotation, and an 8 Hz envelope.", listOf(t(TransformKind.TESLA_HARMONICS, .22f), t(TransformKind.MEYL_VORTEX, .30f), t(TransformKind.PUHARICH_8, .20f))),
-        ForgePreset("Scalar Cancellation Lab", "Phase-opposed stereo simulation plus an ELF envelope. This is DSP phase cancellation, not a claim of exotic propagation.", listOf(t(TransformKind.PHASE_OPPOSED, .55f), t(TransformKind.SCHUMANN_783, .18f))),
-        ForgePreset("Virtual Wave Pair", "Forward audio blended with a local reversed/conjugate copy.", listOf(t(TransformKind.ADVANCED_RETARDED, .45f))),
-        ForgePreset("Advanced / Retarded ELF", "Forward/reverse pairing under a slow 7.83 Hz envelope.", listOf(t(TransformKind.ADVANCED_RETARDED, .35f), t(TransformKind.SCHUMANN_783, .20f))),
-        ForgePreset("DNA / Water Harmonic", "256 Hz-derived harmonic ladder with an 8 Hz envelope. Experimental label; exact operation is ordinary DSP.", listOf(t(TransformKind.DNA_WATER, .28f), t(TransformKind.PUHARICH_8, .20f))),
-        ForgePreset("Triple ELF", "7.83, 8 and 9 Hz compound modulation for close-frequency beating.", listOf(t(TransformKind.TRIPLE_ELF, .42f))),
-        ForgePreset("PHASER Sweep", "20-200 Hz swept modulation inspired by Puharich's carrier/envelope architecture.", listOf(t(TransformKind.PHASER_SWEEP, .25f), t(TransformKind.CONTROL_256, .10f))),
-        ForgePreset("Standing Scalar Simulation", "Periodic nodes, phase opposition and center-field projection.", listOf(t(TransformKind.STANDING_WAVE, .35f), t(TransformKind.PHASE_OPPOSED, .30f), t(TransformKind.LONGITUDINAL_MONO, .20f))),
-        ForgePreset("Information Imprint", "Deterministic phase-coded reference carrier under an 8 Hz framing envelope.", listOf(t(TransformKind.INFORMATION_CARRIER, .22f), t(TransformKind.PUHARICH_8, .15f))),
-        ForgePreset("Distance Transfer Experimental", "Chirp/spread pattern plus information carrier and phase pair for correlation experiments. It does not create a radio transmitter from a phone speaker.", listOf(t(TransformKind.CHIRP_SPREAD, .30f), t(TransformKind.INFORMATION_CARRIER, .25f), t(TransformKind.PHASE_OPPOSED, .22f))),
-        ForgePreset("Puharich-Bearden-Meyl MAX", "8 Hz + 256 Hz + phase vortex + opposed pair + conjugate window. A dense multi-branch-style DSP preset.", listOf(t(TransformKind.PUHARICH_8, .18f), t(TransformKind.CONTROL_256, .10f), t(TransformKind.MEYL_VORTEX, .25f), t(TransformKind.PHASE_OPPOSED, .22f), t(TransformKind.BEARDEN_CONJUGATE, .25f)))
+        ForgePreset(
+            "Convert Only",
+            PresetCategory.CONVERTER,
+            "No experimental transform. Decode and export the source audio through the selected output format.",
+            emptyList()
+        ),
+        ForgePreset(
+            "Puharich Core",
+            PresetCategory.PUHARICH,
+            "Full Puharich-inspired 8 Hz envelope plus the 256 Hz reference layer.",
+            listOf(t(TransformKind.PUHARICH_8), t(TransformKind.CONTROL_256))
+        ),
+        ForgePreset(
+            "Schumann + Puharich",
+            PresetCategory.PUHARICH,
+            "Full 7.83 Hz Schumann-pattern modulation, full 8 Hz Puharich-pattern modulation, and the 256 Hz reference layer.",
+            listOf(t(TransformKind.SCHUMANN_783), t(TransformKind.PUHARICH_8), t(TransformKind.CONTROL_256))
+        ),
+        ForgePreset(
+            "Gateway-Puharich",
+            PresetCategory.PUHARICH,
+            "Full 252/260 Hz stereo difference pair plus the complete 8 Hz modulation method.",
+            listOf(t(TransformKind.GATEWAY_STEREO), t(TransformKind.PUHARICH_8))
+        ),
+        ForgePreset(
+            "Puharich PHASER System",
+            PresetCategory.PUHARICH,
+            "Full 20-200 Hz PHASER-style sweep, 8 Hz rhythm, and 256 Hz reference carrier.",
+            listOf(t(TransformKind.PHASER_SWEEP), t(TransformKind.PUHARICH_8), t(TransformKind.CONTROL_256))
+        ),
+        ForgePreset(
+            "Tesla-Meyl-Puharich",
+            PresetCategory.TESLA_MEYL,
+            "Full Tesla-style harmonic layer, Meyl-style stereo phase rotation, and Puharich 8 Hz modulation.",
+            listOf(t(TransformKind.TESLA_HARMONICS), t(TransformKind.MEYL_VORTEX), t(TransformKind.PUHARICH_8))
+        ),
+        ForgePreset(
+            "Scalar Cancellation Lab",
+            PresetCategory.SCALAR,
+            "Full phase-opposition structure plus a complete Schumann-pattern modulation. This is a DSP phase experiment, not proof of exotic propagation.",
+            listOf(t(TransformKind.PHASE_OPPOSED), t(TransformKind.SCHUMANN_783))
+        ),
+        ForgePreset(
+            "Standing Longitudinal Lab",
+            PresetCategory.SCALAR,
+            "Full standing-node pattern, phase opposition and center projection.",
+            listOf(t(TransformKind.STANDING_WAVE), t(TransformKind.PHASE_OPPOSED), t(TransformKind.LONGITUDINAL_MONO))
+        ),
+        ForgePreset(
+            "Advanced / Retarded ELF",
+            PresetCategory.BEARDEN,
+            "Full forward/time-reversed pairing plus complete 7.83 Hz modulation.",
+            listOf(t(TransformKind.ADVANCED_RETARDED), t(TransformKind.SCHUMANN_783))
+        ),
+        ForgePreset(
+            "Bearden Conjugate Pair",
+            PresetCategory.BEARDEN,
+            "Full reversed-polarity conjugate-style pair with phase-opposed stereo structure.",
+            listOf(t(TransformKind.BEARDEN_CONJUGATE), t(TransformKind.PHASE_OPPOSED))
+        ),
+        ForgePreset(
+            "DNA / Water Harmonic",
+            PresetCategory.BIO,
+            "Full 256/512/1024 harmonic modulation ladder plus Puharich 8 Hz modulation.",
+            listOf(t(TransformKind.DNA_WATER), t(TransformKind.PUHARICH_8))
+        ),
+        ForgePreset(
+            "Triple ELF",
+            PresetCategory.BIO,
+            "Complete 7.83, 8 and 9 Hz compound modulation for close-frequency beating experiments.",
+            listOf(t(TransformKind.TRIPLE_ELF))
+        ),
+        ForgePreset(
+            "Brain Rhythm Ladder",
+            PresetCategory.BIO,
+            "Complete stepped 4 / 7.83 / 8 / 10 / 20 / 40 Hz modulation sequence.",
+            listOf(t(TransformKind.BRAIN_LADDER))
+        ),
+        ForgePreset(
+            "Information Imprint",
+            PresetCategory.INFORMATION,
+            "Full deterministic phase-coded carrier plus complete 8 Hz framing modulation.",
+            listOf(t(TransformKind.INFORMATION_CARRIER), t(TransformKind.PUHARICH_8))
+        ),
+        ForgePreset(
+            "Distance Transfer Experimental",
+            PresetCategory.INFORMATION,
+            "Full chirp/spread pattern, deterministic information carrier and phase-opposed method for correlation experiments. It does not turn a phone speaker into a radio or scalar transmitter.",
+            listOf(t(TransformKind.CHIRP_SPREAD), t(TransformKind.INFORMATION_CARRIER), t(TransformKind.PHASE_OPPOSED))
+        ),
+        ForgePreset(
+            "Puharich-Bearden-Meyl MAX",
+            PresetCategory.MAX,
+            "Dense full-method combination: Puharich 8 Hz, 256 Hz control, Meyl phase rotation, phase opposition and Bearden-style conjugate pairing.",
+            listOf(
+                t(TransformKind.PUHARICH_8),
+                t(TransformKind.CONTROL_256),
+                t(TransformKind.MEYL_VORTEX),
+                t(TransformKind.PHASE_OPPOSED),
+                t(TransformKind.BEARDEN_CONJUGATE)
+            )
+        )
     )
+
+    fun byCategory(category: PresetCategory): List<ForgePreset> = quick.filter { it.category == category }
 }

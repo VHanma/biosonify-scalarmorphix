@@ -12,7 +12,6 @@ import kotlin.math.PI
 import kotlin.math.cos
 import kotlin.math.max
 import kotlin.math.min
-import kotlin.math.sin
 import kotlin.math.sqrt
 
 class WaveformView @JvmOverloads constructor(
@@ -22,9 +21,11 @@ class WaveformView @JvmOverloads constructor(
     private val grid = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.rgb(45, 49, 64); strokeWidth = 1f }
     private val wave = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.rgb(156, 124, 255); strokeWidth = 2f }
     private val spectrumPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { strokeWidth = 1f }
-    private val textPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.rgb(180, 184, 199); textSize = 26f }
-    private val history = ArrayList<Float>()
-    private val spectrogram = ArrayList<FloatArray>()
+    private val textPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.rgb(180, 184, 199); textSize = 24f }
+    private val titlePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.WHITE; textSize = 25f }
+    private val history = ArrayList<Float>(12_000)
+    private val spectrogram = ArrayList<FloatArray>(260)
+    private var labels: List<String> = emptyList()
     private var zoom = 1f
     private var pan = 0f
     private var lastX = 0f
@@ -38,6 +39,11 @@ class WaveformView @JvmOverloads constructor(
         }
     })
 
+    fun setWaveLabels(value: List<String>) {
+        labels = value.distinct().take(8)
+        invalidate()
+    }
+
     fun clearHistory() {
         history.clear()
         spectrogram.clear()
@@ -46,21 +52,13 @@ class WaveformView @JvmOverloads constructor(
         invalidate()
     }
 
-    fun setSamples(value: FloatArray) {
-        clearHistory()
-        appendSamples(value)
-    }
-
     fun appendSamples(value: FloatArray) {
         if (value.isEmpty()) return
-        val points = downsample(value, 180)
-        history.addAll(points.toList())
-        if (history.size > 12_000) {
-            val remove = history.size - 12_000
-            repeat(remove) { history.removeAt(0) }
-        }
+        val points = downsample(value, 160)
+        for (point in points) history.add(point)
+        if (history.size > 12_000) history.subList(0, history.size - 12_000).clear()
         spectrogram.add(spectrumOf(value, 48))
-        while (spectrogram.size > 260) spectrogram.removeAt(0)
+        if (spectrogram.size > 260) spectrogram.subList(0, spectrogram.size - 260).clear()
         clampPan()
         invalidate()
     }
@@ -98,18 +96,22 @@ class WaveformView @JvmOverloads constructor(
     override fun onDraw(canvas: Canvas) {
         super.onDraw(canvas)
         canvas.drawColor(Color.rgb(13, 16, 24))
+        canvas.drawText("OUTPUT WAVEFORM", 14f, 28f, titlePaint)
+        if (labels.isNotEmpty()) {
+            canvas.drawText(labels.joinToString("  •  ").take(92), 14f, 55f, textPaint)
+        }
         drawWaveform(canvas)
+        canvas.drawText("SPECTROGRAM", 14f, height * 0.54f, titlePaint)
         drawSpectrogram(canvas)
         canvas.drawText("pinch = zoom   drag = scroll", 14f, height - 12f, textPaint)
     }
 
     private fun drawWaveform(canvas: Canvas) {
-        val top = 8f
-        val bottom = height * 0.46f
+        val top = 66f
+        val bottom = height * 0.47f
         val mid = (top + bottom) * 0.5f
         canvas.drawLine(0f, mid, width.toFloat(), mid, grid)
         if (history.size < 2) return
-
         val count = visibleSampleCount()
         val maxStart = max(0, history.size - count)
         val start = (pan * maxStart).toInt().coerceIn(0, maxStart)
@@ -130,7 +132,7 @@ class WaveformView @JvmOverloads constructor(
 
     private fun drawSpectrogram(canvas: Canvas) {
         if (spectrogram.isEmpty()) return
-        val top = height * 0.52f
+        val top = height * 0.57f
         val bottom = height * 0.91f
         val visibleCols = max(2, (spectrogram.size / zoom).toInt())
         val maxStart = max(0, spectrogram.size - visibleCols)
@@ -140,7 +142,6 @@ class WaveformView @JvmOverloads constructor(
         val colW = width.toFloat() / (end - start)
         val bins = spectrogram[start].size
         val rowH = (bottom - top) / bins
-
         for (column in start until end) {
             val values = spectrogram[column]
             val x0 = (column - start) * colW
@@ -185,7 +186,7 @@ class WaveformView @JvmOverloads constructor(
     }
 
     private fun spectrumOf(input: FloatArray, bins: Int): FloatArray {
-        val n = min(1024, input.size)
+        val n = min(768, input.size)
         if (n < 8) return FloatArray(bins)
         val out = FloatArray(bins)
         var maxMag = 1e-9
@@ -198,7 +199,7 @@ class WaveformView @JvmOverloads constructor(
                 val window = 0.5 - 0.5 * cos(2.0 * PI * i / (n - 1))
                 val v = input[i] * window
                 re += v * cos(angle)
-                im -= v * sin(angle)
+                im -= v * kotlin.math.sin(angle)
             }
             val magnitude = sqrt(re * re + im * im)
             out[k] = magnitude.toFloat()
