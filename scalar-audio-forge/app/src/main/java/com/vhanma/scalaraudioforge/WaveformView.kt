@@ -5,9 +5,13 @@ import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
 import android.util.AttributeSet
+import android.view.MotionEvent
+import android.view.ScaleGestureDetector
 import android.view.View
 import kotlin.math.PI
 import kotlin.math.cos
+import kotlin.math.max
+import kotlin.math.min
 import kotlin.math.sin
 import kotlin.math.sqrt
 
@@ -17,74 +21,190 @@ class WaveformView @JvmOverloads constructor(
 ) : View(context, attrs) {
     private val grid = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.rgb(45, 49, 64); strokeWidth = 1f }
     private val wave = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.rgb(156, 124, 255); strokeWidth = 2f }
-    private val spectrumPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.rgb(73, 210, 180); strokeWidth = 3f }
-    private var samples = FloatArray(0)
-    private var spectrum = FloatArray(0)
+    private val spectrumPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { strokeWidth = 1f }
+    private val textPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.rgb(180, 184, 199); textSize = 26f }
+    private val history = ArrayList<Float>()
+    private val spectrogram = ArrayList<FloatArray>()
+    private var zoom = 1f
+    private var pan = 0f
+    private var lastX = 0f
+
+    private val scaleDetector = ScaleGestureDetector(context, object : ScaleGestureDetector.SimpleOnScaleGestureListener() {
+        override fun onScale(detector: ScaleGestureDetector): Boolean {
+            zoom = (zoom * detector.scaleFactor).coerceIn(1f, 24f)
+            clampPan()
+            invalidate()
+            return true
+        }
+    })
+
+    fun clearHistory() {
+        history.clear()
+        spectrogram.clear()
+        zoom = 1f
+        pan = 0f
+        invalidate()
+    }
 
     fun setSamples(value: FloatArray) {
+        clearHistory()
+        appendSamples(value)
+    }
+
+    fun appendSamples(value: FloatArray) {
         if (value.isEmpty()) return
-        samples = downsample(value, 1400)
-        spectrum = spectrumOf(value, 64)
+        val points = downsample(value, 180)
+        history.addAll(points.toList())
+        if (history.size > 12_000) {
+            val remove = history.size - 12_000
+            repeat(remove) { history.removeAt(0) }
+        }
+        spectrogram.add(spectrumOf(value, 48))
+        while (spectrogram.size > 260) spectrogram.removeAt(0)
+        clampPan()
         invalidate()
+    }
+
+    override fun onTouchEvent(event: MotionEvent): Boolean {
+        scaleDetector.onTouchEvent(event)
+        when (event.actionMasked) {
+            MotionEvent.ACTION_DOWN -> {
+                lastX = event.x
+                parent?.requestDisallowInterceptTouchEvent(true)
+                return true
+            }
+            MotionEvent.ACTION_MOVE -> {
+                if (!scaleDetector.isInProgress && history.size > 1) {
+                    val dx = event.x - lastX
+                    lastX = event.x
+                    val visible = visibleSampleCount()
+                    val maxStart = max(0, history.size - visible)
+                    if (maxStart > 0 && width > 0) {
+                        val deltaStart = -dx / width * visible
+                        pan = (pan + deltaStart / maxStart).coerceIn(0f, 1f)
+                        invalidate()
+                    }
+                }
+                return true
+            }
+            MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                parent?.requestDisallowInterceptTouchEvent(false)
+                return true
+            }
+        }
+        return true
     }
 
     override fun onDraw(canvas: Canvas) {
         super.onDraw(canvas)
         canvas.drawColor(Color.rgb(13, 16, 24))
-        val mid = height * 0.37f
+        drawWaveform(canvas)
+        drawSpectrogram(canvas)
+        canvas.drawText("pinch = zoom   drag = scroll", 14f, height - 12f, textPaint)
+    }
+
+    private fun drawWaveform(canvas: Canvas) {
+        val top = 8f
+        val bottom = height * 0.46f
+        val mid = (top + bottom) * 0.5f
         canvas.drawLine(0f, mid, width.toFloat(), mid, grid)
-        if (samples.size > 1) {
-            val amp = height * 0.31f
-            var lastX = 0f
-            var lastY = mid
-            samples.forEachIndexed { index, s ->
-                val x = index.toFloat() / (samples.size - 1) * width
-                val y = mid - s.coerceIn(-1f, 1f) * amp
-                if (index > 0) canvas.drawLine(lastX, lastY, x, y, wave)
-                lastX = x
-                lastY = y
-            }
-        }
-        val base = height * .96f
-        val top = height * .58f
-        if (spectrum.isNotEmpty()) {
-            val bar = width.toFloat() / spectrum.size
-            for (i in spectrum.indices) {
-                val h = spectrum[i].coerceIn(0f, 1f) * (base - top)
-                val x = i * bar + bar * .5f
-                canvas.drawLine(x, base, x, base - h, spectrumPaint)
-            }
+        if (history.size < 2) return
+
+        val count = visibleSampleCount()
+        val maxStart = max(0, history.size - count)
+        val start = (pan * maxStart).toInt().coerceIn(0, maxStart)
+        val end = min(history.size, start + count)
+        if (end - start < 2) return
+        val amp = (bottom - top) * 0.46f
+        var lastDrawX = 0f
+        var lastDrawY = mid
+        for (i in start until end) {
+            val local = i - start
+            val x = local.toFloat() / (end - start - 1) * width
+            val y = mid - history[i].coerceIn(-1f, 1f) * amp
+            if (local > 0) canvas.drawLine(lastDrawX, lastDrawY, x, y, wave)
+            lastDrawX = x
+            lastDrawY = y
         }
     }
 
-    private fun downsample(input: FloatArray, max: Int): FloatArray {
-        if (input.size <= max) return input.copyOf()
-        val out = FloatArray(max)
-        val step = input.size.toDouble() / max
-        for (i in out.indices) out[i] = input[(i * step).toInt().coerceAtMost(input.lastIndex)]
+    private fun drawSpectrogram(canvas: Canvas) {
+        if (spectrogram.isEmpty()) return
+        val top = height * 0.52f
+        val bottom = height * 0.91f
+        val visibleCols = max(2, (spectrogram.size / zoom).toInt())
+        val maxStart = max(0, spectrogram.size - visibleCols)
+        val start = (pan * maxStart).toInt().coerceIn(0, maxStart)
+        val end = min(spectrogram.size, start + visibleCols)
+        if (end <= start) return
+        val colW = width.toFloat() / (end - start)
+        val bins = spectrogram[start].size
+        val rowH = (bottom - top) / bins
+
+        for (column in start until end) {
+            val values = spectrogram[column]
+            val x0 = (column - start) * colW
+            for (bin in values.indices) {
+                val v = values[bin].coerceIn(0f, 1f)
+                val r = (30 + 180 * v).toInt().coerceIn(0, 255)
+                val g = (45 + 190 * v * v).toInt().coerceIn(0, 255)
+                val b = (70 + 150 * (1f - v)).toInt().coerceIn(0, 255)
+                spectrumPaint.color = Color.rgb(r, g, b)
+                val y1 = bottom - bin * rowH
+                canvas.drawRect(x0, y1 - rowH, x0 + colW + 1f, y1, spectrumPaint)
+            }
+        }
+        canvas.drawLine(0f, top, width.toFloat(), top, grid)
+    }
+
+    private fun visibleSampleCount(): Int {
+        if (history.isEmpty()) return 0
+        return max(2, (history.size / zoom).toInt()).coerceAtMost(history.size)
+    }
+
+    private fun clampPan() {
+        pan = pan.coerceIn(0f, 1f)
+        if (zoom <= 1.001f) pan = 0f
+    }
+
+    private fun downsample(input: FloatArray, maxPoints: Int): FloatArray {
+        if (input.size <= maxPoints) return input.copyOf()
+        val out = FloatArray(maxPoints)
+        val step = input.size.toDouble() / maxPoints
+        for (i in out.indices) {
+            val from = (i * step).toInt().coerceAtMost(input.lastIndex)
+            val to = (((i + 1) * step).toInt()).coerceAtMost(input.size)
+            var peak = 0f
+            for (j in from until max(from + 1, to)) {
+                val v = input[j]
+                if (kotlin.math.abs(v) > kotlin.math.abs(peak)) peak = v
+            }
+            out[i] = peak
+        }
         return out
     }
 
     private fun spectrumOf(input: FloatArray, bins: Int): FloatArray {
-        val n = minOf(1024, input.size)
-        if (n < 8) return FloatArray(0)
+        val n = min(1024, input.size)
+        if (n < 8) return FloatArray(bins)
         val out = FloatArray(bins)
-        var max = 1e-9
+        var maxMag = 1e-9
         for (k in 0 until bins) {
+            val fftBin = 1 + k * (n / 2 - 1) / bins
             var re = 0.0
             var im = 0.0
             for (i in 0 until n) {
-                val angle = 2.0 * PI * k * i / n
+                val angle = 2.0 * PI * fftBin * i / n
                 val window = 0.5 - 0.5 * cos(2.0 * PI * i / (n - 1))
                 val v = input[i] * window
                 re += v * cos(angle)
                 im -= v * sin(angle)
             }
-            val mag = sqrt(re * re + im * im)
-            out[k] = mag.toFloat()
-            if (mag > max) max = mag
+            val magnitude = sqrt(re * re + im * im)
+            out[k] = magnitude.toFloat()
+            if (magnitude > maxMag) maxMag = magnitude
         }
-        for (i in out.indices) out[i] = (out[i] / max.toFloat()).coerceIn(0f, 1f)
+        for (i in out.indices) out[i] = sqrt(out[i] / maxMag.toFloat()).coerceIn(0f, 1f)
         return out
     }
 }

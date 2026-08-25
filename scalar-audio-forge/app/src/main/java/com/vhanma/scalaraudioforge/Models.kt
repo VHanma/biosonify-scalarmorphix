@@ -30,3 +30,35 @@ data class ForgePreset(
     val description: String,
     val transforms: List<TransformSpec>
 )
+
+enum class MergeMode(val label: String) {
+    NORMALIZED_WEIGHTED("Normalized weighted merge"),
+    EQUAL_AVERAGE("Equal branch average"),
+    ALTERNATING_POLARITY("Alternating-polarity interferometry")
+}
+
+data class ForgeBranch(
+    val name: String,
+    val weight: Float = 1f,
+    val transforms: List<TransformSpec>
+)
+
+data class ForgeMatrix(
+    val enabled: Boolean = false,
+    val mode: MergeMode = MergeMode.NORMALIZED_WEIGHTED,
+    val branches: List<ForgeBranch> = emptyList(),
+    val master: List<TransformSpec> = emptyList()
+)
+
+enum class OutputFormat(
+    val label: String,
+    val extension: String,
+    val mimeType: String
+) {
+    WAV16("WAV PCM 16-bit", "wav", "audio/wav"),
+    WAV24("WAV PCM 24-bit", "wav", "audio/wav"),
+    WAV_FLOAT32("WAV Float 32-bit", "wav", "audio/wav"),
+    RF64("RF64 PCM 16-bit • huge files", "wav", "audio/wav"),
+    AAC_M4A("AAC-LC • M4A", "m4a", "audio/mp4"),
+    OPUS_OGG("Opus • OGG", "ogg", "audio/ogg")
+}
