@@ -33,6 +33,9 @@ jobs:
         with:
           gradle-version: '8.9'
 
+      - name: Full-method DSP regression tests
+        run: gradle -p scalar-audio-forge :app:testDebugUnitTest --stacktrace
+
       - name: Compile installable APK
         run: gradle -p scalar-audio-forge :app:assembleDebug --stacktrace
 
