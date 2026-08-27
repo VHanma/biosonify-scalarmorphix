@@ -13,33 +13,92 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
       - name: Java 17
         uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: '17'
+
       - name: Android command-line tools
         uses: android-actions/setup-android@v3
+
       - name: Android SDK 36
         run: |
           yes | sdkmanager --licenses >/dev/null || true
           sdkmanager 'platforms;android-36' 'build-tools;35.0.0'
+
+      - name: Restore stable installer signing key
+        uses: actions/cache@v4
+        with:
+          path: ~/.android/debug.keystore
+          key: scalar-audio-forge-modular-safe-signing-v1
+
+      - name: Ensure stable installer signing key exists
+        run: |
+          mkdir -p "$HOME/.android"
+          if [ ! -f "$HOME/.android/debug.keystore" ]; then
+            keytool -genkeypair \
+              -keystore "$HOME/.android/debug.keystore" \
+              -storepass android \
+              -alias androiddebugkey \
+              -keypass android \
+              -dname "CN=Scalar Audio Forge Modular Safe,O=VHanma,C=US" \
+              -keyalg RSA \
+              -keysize 2048 \
+              -validity 10000
+          fi
+          keytool -list -v -keystore "$HOME/.android/debug.keystore" -storepass android -alias androiddebugkey | grep -E 'Alias name:|SHA256:'
+
       - name: Gradle 8.9
         uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.9'
+
       - name: Full-method + Combo Atlas + Modular UI regression tests
         run: gradle -p scalar-audio-forge :app:testDebugUnitTest --stacktrace
+
       - name: Compile installable APK
         run: gradle -p scalar-audio-forge :app:assembleDebug --stacktrace
-      - name: Package APK + checksum
+
+      - name: APK installability audit
+        shell: bash
+        run: |
+          set -euo pipefail
+          APK="scalar-audio-forge/app/build/outputs/apk/debug/app-debug.apk"
+          BUILD_TOOLS="$ANDROID_HOME/build-tools/35.0.0"
+
+          echo "--- ZIP integrity ---"
+          unzip -t "$APK" >/dev/null
+
+          echo "--- Manifest / package identity ---"
+          "$BUILD_TOOLS/aapt2" dump badging "$APK" | tee /tmp/apk-badging.txt
+          grep -Fq "package: name='com.vhanma.scalaraudioforge.modularsafe'" /tmp/apk-badging.txt
+          grep -Fq "sdkVersion:'26'" /tmp/apk-badging.txt
+          grep -Fq "targetSdkVersion:'36'" /tmp/apk-badging.txt
+          grep -Fq "launchable-activity: name='com.vhanma.scalaraudioforge.MainActivity'" /tmp/apk-badging.txt
+
+          echo "--- ZIP / 16 KiB page alignment compatibility ---"
+          "$BUILD_TOOLS/zipalign" -c -P 16 -v 4 "$APK"
+
+          echo "--- APK signature schemes ---"
+          "$BUILD_TOOLS/apksigner" verify --verbose --print-certs "$APK" | tee /tmp/apk-signature.txt
+          grep -Fq "Verified using v1 scheme (JAR signing): true" /tmp/apk-signature.txt
+          grep -Fq "Verified using v2 scheme (APK Signature Scheme v2): true" /tmp/apk-signature.txt
+
+          echo "INSTALLABILITY AUDIT PASSED"
+
+      - name: Package APK + checksum + audit reports
         run: |
           mkdir -p dist
-          cp scalar-audio-forge/app/build/outputs/apk/debug/app-debug.apk dist/ScalarAudioForge-ModularLab-v1.6-true-clone-debug.apk
-          sha256sum dist/ScalarAudioForge-ModularLab-v1.6-true-clone-debug.apk > dist/ScalarAudioForge-ModularLab-v1.6-true-clone-debug.apk.sha256
+          cp scalar-audio-forge/app/build/outputs/apk/debug/app-debug.apk dist/ScalarAudioForge-ModularSafe-v1.7-installer-safe-clone.apk
+          sha256sum dist/ScalarAudioForge-ModularSafe-v1.7-installer-safe-clone.apk > dist/ScalarAudioForge-ModularSafe-v1.7-installer-safe-clone.apk.sha256
+          cp /tmp/apk-badging.txt dist/ScalarAudioForge-ModularSafe-v1.7-badging.txt
+          cp /tmp/apk-signature.txt dist/ScalarAudioForge-ModularSafe-v1.7-signature.txt
+
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: ScalarAudioForge-ModularLab-v1.6-true-clone-debug
+          name: ScalarAudioForge-ModularSafe-v1.7-installer-safe-clone
           path: dist/*
           if-no-files-found: error
