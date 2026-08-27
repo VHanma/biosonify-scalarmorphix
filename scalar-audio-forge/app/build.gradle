@@ -6,19 +6,36 @@ plugins {
 android {
     namespace 'com.vhanma.scalaraudioforge'
     compileSdk 36
+
+    signingConfigs {
+        debug {
+            // Explicit multi-scheme signing for broad PackageInstaller compatibility.
+            // The CI workflow persists this debug keystore for future updates of this line.
+            enableV1Signing true
+            enableV2Signing true
+            enableV3Signing true
+            enableV4Signing false
+        }
+    }
+
     defaultConfig {
-        applicationId 'com.vhanma.scalaraudioforge.modularlab'
+        applicationId 'com.vhanma.scalaraudioforge.modularsafe'
         minSdk 26
         targetSdk 36
-        versionCode 7
-        versionName '1.6-modular-true-clone'
+        versionCode 8
+        versionName '1.7-installer-safe-clone'
     }
+
     buildTypes {
+        debug {
+            signingConfig signingConfigs.debug
+        }
         release {
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
         }
     }
+
     compileOptions {
         sourceCompatibility JavaVersion.VERSION_17
         targetCompatibility JavaVersion.VERSION_17
