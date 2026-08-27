@@ -64,22 +64,21 @@ jobs:
       - name: Full-method + Combo Atlas + Modular UI regression tests
         run: gradle -p scalar-audio-forge :app:testDebugUnitTest --stacktrace
 
-      - name: Compile APK payload
-        run: gradle -p scalar-audio-forge :app:assembleDebug --stacktrace
+      - name: Compile unsigned release APK payload
+        run: gradle -p scalar-audio-forge :app:assembleRelease --stacktrace
 
       - name: Align and explicitly sign installer artifact
         shell: bash
         run: |
           set -euo pipefail
           BUILD_TOOLS="$ANDROID_HOME/build-tools/35.0.0"
-          INPUT="scalar-audio-forge/app/build/outputs/apk/debug/app-debug.apk"
+          INPUT="scalar-audio-forge/app/build/outputs/apk/release/app-release-unsigned.apk"
+          APK="dist/ScalarAudioForge-ModularSafe-v1.7-installer-safe-clone.apk"
+          test -f "$INPUT"
           mkdir -p dist
 
-          # Alignment happens before the final signature so v2/v3 cover the final bytes.
+          # Android's documented order is unsigned APK -> zipalign -> apksigner.
           "$BUILD_TOOLS/zipalign" -f -P 16 4 "$INPUT" /tmp/scalar-aligned.apk
-
-          # Re-sign the final archive ourselves. This removes ambiguity from AGP's
-          # automatic debug signing and forces broad v1 + modern v2/v3 compatibility.
           "$BUILD_TOOLS/apksigner" sign \
             --ks "$HOME/.android/debug.keystore" \
             --ks-key-alias androiddebugkey \
@@ -89,7 +88,7 @@ jobs:
             --v2-signing-enabled true \
             --v3-signing-enabled true \
             --v4-signing-enabled false \
-            --out dist/ScalarAudioForge-ModularSafe-v1.7-installer-safe-clone.apk \
+            --out "$APK" \
             /tmp/scalar-aligned.apk
 
       - name: APK installability audit
@@ -112,14 +111,41 @@ jobs:
           echo "--- ZIP / 16 KiB page alignment compatibility ---"
           "$BUILD_TOOLS/zipalign" -c -P 16 -v 4 "$APK" | tee /tmp/apk-alignment.txt
 
-          echo "--- APK signature schemes ---"
-          "$BUILD_TOOLS/apksigner" verify --verbose --print-certs "$APK" | tee /tmp/apk-signature.txt
-          grep -Fq "Verified using v1 scheme (JAR signing): true" /tmp/apk-signature.txt
+          echo "--- APK signatures for every supported Android version ---"
+          "$BUILD_TOOLS/apksigner" verify --min-sdk-version 26 --verbose --print-certs "$APK" | tee /tmp/apk-signature.txt
           grep -Fq "Verified using v2 scheme (APK Signature Scheme v2): true" /tmp/apk-signature.txt
           grep -Fq "Verified using v3 scheme (APK Signature Scheme v3): true" /tmp/apk-signature.txt
-          grep -Fq "Signer #1 certificate DN: C=US, O=VHanma, CN=Scalar Audio Forge Modular Safe" /tmp/apk-signature.txt
+          grep -Fq "Signer #1 certificate DN: CN=Scalar Audio Forge Modular Safe, O=VHanma, C=US" /tmp/apk-signature.txt
 
-          echo "INSTALLABILITY AUDIT PASSED"
+          # v1/JAR signatures are only needed for Android versions below this app's
+          # minSdk 26. Keep apksigner configured to emit them where applicable, but
+          # do not reject a valid API 26+ APK because apksigner elects not to verify v1.
+          echo "INSTALLABILITY STATIC AUDIT PASSED"
+
+      - name: Android 16 PackageManager install + launch smoke test
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 36
+          target: google_apis
+          arch: x86_64
+          profile: pixel_6
+          disable-animations: true
+          script: |
+            set -e
+            APK="$GITHUB_WORKSPACE/dist/ScalarAudioForge-ModularSafe-v1.7-installer-safe-clone.apk"
+            PKG="com.vhanma.scalaraudioforge.modularsafe"
+            ACT="com.vhanma.scalaraudioforge.MainActivity"
+            adb install "$APK" | tee /tmp/adb-install.txt
+            grep -Fq "Success" /tmp/adb-install.txt
+            adb shell pm path "$PKG" | tee /tmp/pm-path.txt
+            grep -Fq "package:" /tmp/pm-path.txt
+            adb shell am force-stop "$PKG"
+            adb shell am start -W -n "$PKG/$ACT" | tee /tmp/app-launch.txt
+            grep -Fq "Status: ok" /tmp/app-launch.txt
+            sleep 4
+            PID=$(adb shell pidof "$PKG" | tr -d '\r')
+            test -n "$PID"
+            echo "ANDROID 16 INSTALL + LAUNCH PASSED (pid=$PID)" | tee /tmp/android-install-smoke.txt
 
       - name: Package checksum + audit reports
         run: |
@@ -128,6 +154,9 @@ jobs:
           cp /tmp/apk-alignment.txt dist/ScalarAudioForge-ModularSafe-v1.7-alignment.txt
           cp /tmp/apk-signature.txt dist/ScalarAudioForge-ModularSafe-v1.7-signature.txt
           cp /tmp/signing-key.txt dist/ScalarAudioForge-ModularSafe-v1.7-signing-key.txt
+          cp /tmp/adb-install.txt dist/ScalarAudioForge-ModularSafe-v1.7-adb-install.txt
+          cp /tmp/app-launch.txt dist/ScalarAudioForge-ModularSafe-v1.7-launch.txt
+          cp /tmp/android-install-smoke.txt dist/ScalarAudioForge-ModularSafe-v1.7-install-smoke.txt
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
