@@ -28,18 +28,18 @@ jobs:
         uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.9'
-      - name: Full-method + Combo Atlas regression tests
+      - name: Full-method + Combo Atlas + Modular UI regression tests
         run: gradle -p scalar-audio-forge :app:testDebugUnitTest --stacktrace
       - name: Compile installable APK
         run: gradle -p scalar-audio-forge :app:assembleDebug --stacktrace
       - name: Package APK + checksum
         run: |
           mkdir -p dist
-          cp scalar-audio-forge/app/build/outputs/apk/debug/app-debug.apk dist/ScalarAudioForge-LiveLab-v1.4-clone-debug.apk
-          sha256sum dist/ScalarAudioForge-LiveLab-v1.4-clone-debug.apk > dist/ScalarAudioForge-LiveLab-v1.4-clone-debug.apk.sha256
+          cp scalar-audio-forge/app/build/outputs/apk/debug/app-debug.apk dist/ScalarAudioForge-ModularLab-v1.5-clone-debug.apk
+          sha256sum dist/ScalarAudioForge-ModularLab-v1.5-clone-debug.apk > dist/ScalarAudioForge-ModularLab-v1.5-clone-debug.apk.sha256
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: ScalarAudioForge-LiveLab-v1.4-clone-debug
+          name: ScalarAudioForge-ModularLab-v1.5-clone-debug
           path: dist/*
           if-no-files-found: error
