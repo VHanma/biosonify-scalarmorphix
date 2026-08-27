@@ -7,11 +7,11 @@ android {
     namespace 'com.vhanma.scalaraudioforge'
     compileSdk 36
     defaultConfig {
-        applicationId 'com.vhanma.scalaraudioforge.livelab'
+        applicationId 'com.vhanma.scalaraudioforge.modularlab'
         minSdk 26
         targetSdk 36
-        versionCode 6
-        versionName '1.5-modular-live-clone'
+        versionCode 7
+        versionName '1.6-modular-true-clone'
     }
     buildTypes {
         release {

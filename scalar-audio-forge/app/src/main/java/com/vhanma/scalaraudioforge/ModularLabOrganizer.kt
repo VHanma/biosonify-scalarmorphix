@@ -28,7 +28,8 @@ object ModularLabOrganizer {
         val pages: List<View>,
         val spinner: Spinner,
         val title: TextView,
-        val subtitle: TextView
+        val subtitle: TextView,
+        val dashboard: ModuleDashboardView
     )
 
     private val states = WeakHashMap<MainActivity, State>()
@@ -38,6 +39,7 @@ object ModularLabOrganizer {
         val content = activity.findViewById<FrameLayout>(android.R.id.content)
         val scroll = findScrollView(content) ?: return
         val original = scroll.getChildAt(0) as? LinearLayout ?: return
+        val workspaceStore = ModularWorkspaceStore(activity)
 
         val topLevel = (0 until original.childCount).map { original.getChildAt(it) }
         val grouped = linkedMapOf<LabModuleSpec, MutableList<View>>()
@@ -60,13 +62,13 @@ object ModularLabOrganizer {
         }
 
         shell.addView(TextView(activity).apply {
-            text = "SCALAR AUDIO FORGE • MODULAR LIVE LAB"
+            text = "SCALAR AUDIO FORGE • MODULAR LAB"
             textSize = 24f
             setTextColor(Color.WHITE)
             setTypeface(typeface, 1)
         })
         shell.addView(TextView(activity).apply {
-            text = "v1.5 • one workspace, separate labs, shared audio + routing state"
+            text = "v1.6 TRUE CLONE • separate install • separate labs • shared in-app workspace state"
             textSize = 12f
             setTextColor(Color.rgb(111, 233, 202))
             setPadding(0, 0, 0, dp(activity, 10))
@@ -124,7 +126,7 @@ object ModularLabOrganizer {
         ))
 
         val pages = mutableListOf<View>()
-        val dashboard = ModuleDashboardView(activity, LabModules.modules) { moduleIndex ->
+        val dashboard = ModuleDashboardView(activity, LabModules.modules, workspaceStore) { moduleIndex ->
             spinner.setSelection(moduleIndex + 1)
         }
         pages += dashboard
@@ -158,11 +160,14 @@ object ModularLabOrganizer {
             val safe = index.coerceIn(0, pages.lastIndex)
             pages.forEachIndexed { i, page -> page.visibility = if (i == safe) View.VISIBLE else View.GONE }
             if (safe == 0) {
+                dashboard.refreshResume()
                 moduleTitle.text = "HOME"
-                moduleSubtitle.text = "Choose one lab. Your file and experiment state follow you between pages."
+                moduleSubtitle.text = "Choose a lab, continue the last one, or jump in by goal. Your experiment state follows you."
             } else {
-                val module = LabModules.modules[safe - 1]
-                moduleTitle.text = "${module.icon} ${module.title}"
+                val moduleIndex = safe - 1
+                val module = LabModules.modules[moduleIndex]
+                workspaceStore.recordModule(moduleIndex)
+                moduleTitle.text = "HOME › ${module.icon} ${module.title}"
                 moduleSubtitle.text = module.subtitle
             }
             host.requestLayout()
@@ -184,7 +189,7 @@ object ModularLabOrganizer {
                 FrameLayout.LayoutParams.WRAP_CONTENT
             )
         )
-        val state = State(scroll, pages, spinner, moduleTitle, moduleSubtitle)
+        val state = State(scroll, pages, spinner, moduleTitle, moduleSubtitle, dashboard)
         states[activity] = state
         show(0)
     }
