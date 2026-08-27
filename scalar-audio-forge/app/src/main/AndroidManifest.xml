@@ -2,8 +2,9 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <uses-permission android:name="android.permission.WAKE_LOCK" />
     <application
+        android:name=".LiveLabApplication"
         android:allowBackup="true"
-        android:label="Scalar Audio Forge"
+        android:label="Scalar Audio Forge Live Lab"
         android:theme="@style/AppTheme"
         android:supportsRtl="true">
         <activity
