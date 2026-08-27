@@ -10,8 +10,8 @@ android {
         applicationId 'com.vhanma.scalaraudioforge.livelab'
         minSdk 26
         targetSdk 36
-        versionCode 5
-        versionName '1.4-live-clone'
+        versionCode 6
+        versionName '1.5-modular-live-clone'
     }
     buildTypes {
         release {
