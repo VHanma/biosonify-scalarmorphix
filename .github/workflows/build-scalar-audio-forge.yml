@@ -2,6 +2,12 @@ name: Scalar Audio Forge APK
 
 on:
   workflow_dispatch:
+  push:
+    branches:
+      - feature/scalar-audio-installer-safe-clone
+    paths:
+      - 'scalar-audio-forge/**'
+      - '.github/workflows/build-scalar-audio-forge.yml'
   pull_request:
     paths:
       - 'scalar-audio-forge/**'
@@ -50,10 +56,10 @@ jobs:
           fi
           keytool -list -v -keystore "$HOME/.android/debug.keystore" -storepass android -alias androiddebugkey | grep -E 'Alias name:|SHA256:'
 
-      - name: Gradle 8.9
+      - name: Gradle 8.13
         uses: gradle/actions/setup-gradle@v4
         with:
-          gradle-version: '8.9'
+          gradle-version: '8.13'
 
       - name: Full-method + Combo Atlas + Modular UI regression tests
         run: gradle -p scalar-audio-forge :app:testDebugUnitTest --stacktrace
@@ -74,7 +80,7 @@ jobs:
           echo "--- Manifest / package identity ---"
           "$BUILD_TOOLS/aapt2" dump badging "$APK" | tee /tmp/apk-badging.txt
           grep -Fq "package: name='com.vhanma.scalaraudioforge.modularsafe'" /tmp/apk-badging.txt
-          grep -Fq "sdkVersion:'26'" /tmp/apk-badging.txt
+          grep -Fq "minSdkVersion:'26'" /tmp/apk-badging.txt
           grep -Fq "targetSdkVersion:'36'" /tmp/apk-badging.txt
           grep -Fq "launchable-activity: name='com.vhanma.scalaraudioforge.MainActivity'" /tmp/apk-badging.txt
 
