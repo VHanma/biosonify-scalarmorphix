@@ -54,7 +54,7 @@ jobs:
               -keysize 2048 \
               -validity 10000
           fi
-          keytool -list -v -keystore "$HOME/.android/debug.keystore" -storepass android -alias androiddebugkey | grep -E 'Alias name:|SHA256:'
+          keytool -list -v -keystore "$HOME/.android/debug.keystore" -storepass android -alias androiddebugkey | grep -E 'Alias name:|Owner:|SHA256:' | tee /tmp/signing-key.txt
 
       - name: Gradle 8.13
         uses: gradle/actions/setup-gradle@v4
@@ -64,14 +64,39 @@ jobs:
       - name: Full-method + Combo Atlas + Modular UI regression tests
         run: gradle -p scalar-audio-forge :app:testDebugUnitTest --stacktrace
 
-      - name: Compile installable APK
+      - name: Compile APK payload
         run: gradle -p scalar-audio-forge :app:assembleDebug --stacktrace
+
+      - name: Align and explicitly sign installer artifact
+        shell: bash
+        run: |
+          set -euo pipefail
+          BUILD_TOOLS="$ANDROID_HOME/build-tools/35.0.0"
+          INPUT="scalar-audio-forge/app/build/outputs/apk/debug/app-debug.apk"
+          mkdir -p dist
+
+          # Alignment happens before the final signature so v2/v3 cover the final bytes.
+          "$BUILD_TOOLS/zipalign" -f -P 16 4 "$INPUT" /tmp/scalar-aligned.apk
+
+          # Re-sign the final archive ourselves. This removes ambiguity from AGP's
+          # automatic debug signing and forces broad v1 + modern v2/v3 compatibility.
+          "$BUILD_TOOLS/apksigner" sign \
+            --ks "$HOME/.android/debug.keystore" \
+            --ks-key-alias androiddebugkey \
+            --ks-pass pass:android \
+            --key-pass pass:android \
+            --v1-signing-enabled true \
+            --v2-signing-enabled true \
+            --v3-signing-enabled true \
+            --v4-signing-enabled false \
+            --out dist/ScalarAudioForge-ModularSafe-v1.7-installer-safe-clone.apk \
+            /tmp/scalar-aligned.apk
 
       - name: APK installability audit
         shell: bash
         run: |
           set -euo pipefail
-          APK="scalar-audio-forge/app/build/outputs/apk/debug/app-debug.apk"
+          APK="dist/ScalarAudioForge-ModularSafe-v1.7-installer-safe-clone.apk"
           BUILD_TOOLS="$ANDROID_HOME/build-tools/35.0.0"
 
           echo "--- ZIP integrity ---"
@@ -85,22 +110,24 @@ jobs:
           grep -Fq "launchable-activity: name='com.vhanma.scalaraudioforge.MainActivity'" /tmp/apk-badging.txt
 
           echo "--- ZIP / 16 KiB page alignment compatibility ---"
-          "$BUILD_TOOLS/zipalign" -c -P 16 -v 4 "$APK"
+          "$BUILD_TOOLS/zipalign" -c -P 16 -v 4 "$APK" | tee /tmp/apk-alignment.txt
 
           echo "--- APK signature schemes ---"
           "$BUILD_TOOLS/apksigner" verify --verbose --print-certs "$APK" | tee /tmp/apk-signature.txt
           grep -Fq "Verified using v1 scheme (JAR signing): true" /tmp/apk-signature.txt
           grep -Fq "Verified using v2 scheme (APK Signature Scheme v2): true" /tmp/apk-signature.txt
+          grep -Fq "Verified using v3 scheme (APK Signature Scheme v3): true" /tmp/apk-signature.txt
+          grep -Fq "Signer #1 certificate DN: C=US, O=VHanma, CN=Scalar Audio Forge Modular Safe" /tmp/apk-signature.txt
 
           echo "INSTALLABILITY AUDIT PASSED"
 
-      - name: Package APK + checksum + audit reports
+      - name: Package checksum + audit reports
         run: |
-          mkdir -p dist
-          cp scalar-audio-forge/app/build/outputs/apk/debug/app-debug.apk dist/ScalarAudioForge-ModularSafe-v1.7-installer-safe-clone.apk
           sha256sum dist/ScalarAudioForge-ModularSafe-v1.7-installer-safe-clone.apk > dist/ScalarAudioForge-ModularSafe-v1.7-installer-safe-clone.apk.sha256
           cp /tmp/apk-badging.txt dist/ScalarAudioForge-ModularSafe-v1.7-badging.txt
+          cp /tmp/apk-alignment.txt dist/ScalarAudioForge-ModularSafe-v1.7-alignment.txt
           cp /tmp/apk-signature.txt dist/ScalarAudioForge-ModularSafe-v1.7-signature.txt
+          cp /tmp/signing-key.txt dist/ScalarAudioForge-ModularSafe-v1.7-signing-key.txt
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
