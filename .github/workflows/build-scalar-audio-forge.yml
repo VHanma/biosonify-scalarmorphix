@@ -2,6 +2,12 @@ name: Scalar Audio Forge APK
 
 on:
   workflow_dispatch:
+  push:
+    branches:
+      - feature/scalar-audio-installer-safe-clone
+    paths:
+      - 'scalar-audio-forge/**'
+      - '.github/workflows/build-scalar-audio-forge.yml'
   pull_request:
     paths:
       - 'scalar-audio-forge/**'
@@ -13,33 +19,148 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
       - name: Java 17
         uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: '17'
+
       - name: Android command-line tools
         uses: android-actions/setup-android@v3
+
       - name: Android SDK 36
         run: |
           yes | sdkmanager --licenses >/dev/null || true
           sdkmanager 'platforms;android-36' 'build-tools;35.0.0'
-      - name: Gradle 8.9
+
+      - name: Restore stable installer signing key
+        uses: actions/cache@v4
+        with:
+          path: ~/.android/debug.keystore
+          key: scalar-audio-forge-modular-safe-signing-v1
+
+      - name: Ensure stable installer signing key exists
+        run: |
+          mkdir -p "$HOME/.android"
+          if [ ! -f "$HOME/.android/debug.keystore" ]; then
+            keytool -genkeypair \
+              -keystore "$HOME/.android/debug.keystore" \
+              -storepass android \
+              -alias androiddebugkey \
+              -keypass android \
+              -dname "CN=Scalar Audio Forge Modular Safe,O=VHanma,C=US" \
+              -keyalg RSA \
+              -keysize 2048 \
+              -validity 10000
+          fi
+          keytool -list -v -keystore "$HOME/.android/debug.keystore" -storepass android -alias androiddebugkey | grep -E 'Alias name:|Owner:|SHA256:' | tee /tmp/signing-key.txt
+
+      - name: Gradle 8.13
         uses: gradle/actions/setup-gradle@v4
         with:
-          gradle-version: '8.9'
+          gradle-version: '8.13'
+
       - name: Full-method + Combo Atlas + Modular UI regression tests
         run: gradle -p scalar-audio-forge :app:testDebugUnitTest --stacktrace
-      - name: Compile installable APK
-        run: gradle -p scalar-audio-forge :app:assembleDebug --stacktrace
-      - name: Package APK + checksum
+
+      - name: Compile unsigned release APK payload
+        run: gradle -p scalar-audio-forge :app:assembleRelease --stacktrace
+
+      - name: Align and explicitly sign installer artifact
+        shell: bash
         run: |
+          set -euo pipefail
+          BUILD_TOOLS="$ANDROID_HOME/build-tools/35.0.0"
+          INPUT="scalar-audio-forge/app/build/outputs/apk/release/app-release-unsigned.apk"
+          APK="dist/ScalarAudioForge-ModularSafe-v1.7-installer-safe-clone.apk"
+          test -f "$INPUT"
           mkdir -p dist
-          cp scalar-audio-forge/app/build/outputs/apk/debug/app-debug.apk dist/ScalarAudioForge-ModularLab-v1.6-true-clone-debug.apk
-          sha256sum dist/ScalarAudioForge-ModularLab-v1.6-true-clone-debug.apk > dist/ScalarAudioForge-ModularLab-v1.6-true-clone-debug.apk.sha256
+
+          # Android's documented order is unsigned APK -> zipalign -> apksigner.
+          "$BUILD_TOOLS/zipalign" -f -P 16 4 "$INPUT" /tmp/scalar-aligned.apk
+          "$BUILD_TOOLS/apksigner" sign \
+            --ks "$HOME/.android/debug.keystore" \
+            --ks-key-alias androiddebugkey \
+            --ks-pass pass:android \
+            --key-pass pass:android \
+            --v1-signing-enabled true \
+            --v2-signing-enabled true \
+            --v3-signing-enabled true \
+            --v4-signing-enabled false \
+            --out "$APK" \
+            /tmp/scalar-aligned.apk
+
+      - name: APK installability audit
+        shell: bash
+        run: |
+          set -euo pipefail
+          APK="dist/ScalarAudioForge-ModularSafe-v1.7-installer-safe-clone.apk"
+          BUILD_TOOLS="$ANDROID_HOME/build-tools/35.0.0"
+
+          echo "--- ZIP integrity ---"
+          unzip -t "$APK" >/dev/null
+
+          echo "--- Manifest / package identity ---"
+          "$BUILD_TOOLS/aapt2" dump badging "$APK" | tee /tmp/apk-badging.txt
+          grep -Fq "package: name='com.vhanma.scalaraudioforge.modularsafe'" /tmp/apk-badging.txt
+          grep -Fq "minSdkVersion:'26'" /tmp/apk-badging.txt
+          grep -Fq "targetSdkVersion:'36'" /tmp/apk-badging.txt
+          grep -Fq "launchable-activity: name='com.vhanma.scalaraudioforge.MainActivity'" /tmp/apk-badging.txt
+
+          echo "--- ZIP / 16 KiB page alignment compatibility ---"
+          "$BUILD_TOOLS/zipalign" -c -P 16 -v 4 "$APK" | tee /tmp/apk-alignment.txt
+
+          echo "--- APK signatures for every supported Android version ---"
+          "$BUILD_TOOLS/apksigner" verify --min-sdk-version 26 --verbose --print-certs "$APK" | tee /tmp/apk-signature.txt
+          grep -Fq "Verified using v2 scheme (APK Signature Scheme v2): true" /tmp/apk-signature.txt
+          grep -Fq "Verified using v3 scheme (APK Signature Scheme v3): true" /tmp/apk-signature.txt
+          grep -Fq "Signer #1 certificate DN: CN=Scalar Audio Forge Modular Safe, O=VHanma, C=US" /tmp/apk-signature.txt
+
+          # v1/JAR signatures are only needed for Android versions below this app's
+          # minSdk 26. Keep apksigner configured to emit them where applicable, but
+          # do not reject a valid API 26+ APK because apksigner elects not to verify v1.
+          echo "INSTALLABILITY STATIC AUDIT PASSED"
+
+      - name: Android 16 PackageManager install + launch smoke test
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 36
+          target: google_apis
+          arch: x86_64
+          profile: pixel_6
+          disable-animations: true
+          script: |
+            set -e
+            APK="$GITHUB_WORKSPACE/dist/ScalarAudioForge-ModularSafe-v1.7-installer-safe-clone.apk"
+            PKG="com.vhanma.scalaraudioforge.modularsafe"
+            ACT="com.vhanma.scalaraudioforge.MainActivity"
+            adb install "$APK" | tee /tmp/adb-install.txt
+            grep -Fq "Success" /tmp/adb-install.txt
+            adb shell pm path "$PKG" | tee /tmp/pm-path.txt
+            grep -Fq "package:" /tmp/pm-path.txt
+            adb shell am force-stop "$PKG"
+            adb shell am start -W -n "$PKG/$ACT" | tee /tmp/app-launch.txt
+            grep -Fq "Status: ok" /tmp/app-launch.txt
+            sleep 4
+            PID=$(adb shell pidof "$PKG" | tr -d '\r')
+            test -n "$PID"
+            echo "ANDROID 16 INSTALL + LAUNCH PASSED (pid=$PID)" | tee /tmp/android-install-smoke.txt
+
+      - name: Package checksum + audit reports
+        run: |
+          sha256sum dist/ScalarAudioForge-ModularSafe-v1.7-installer-safe-clone.apk > dist/ScalarAudioForge-ModularSafe-v1.7-installer-safe-clone.apk.sha256
+          cp /tmp/apk-badging.txt dist/ScalarAudioForge-ModularSafe-v1.7-badging.txt
+          cp /tmp/apk-alignment.txt dist/ScalarAudioForge-ModularSafe-v1.7-alignment.txt
+          cp /tmp/apk-signature.txt dist/ScalarAudioForge-ModularSafe-v1.7-signature.txt
+          cp /tmp/signing-key.txt dist/ScalarAudioForge-ModularSafe-v1.7-signing-key.txt
+          cp /tmp/adb-install.txt dist/ScalarAudioForge-ModularSafe-v1.7-adb-install.txt
+          cp /tmp/app-launch.txt dist/ScalarAudioForge-ModularSafe-v1.7-launch.txt
+          cp /tmp/android-install-smoke.txt dist/ScalarAudioForge-ModularSafe-v1.7-install-smoke.txt
+
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: ScalarAudioForge-ModularLab-v1.6-true-clone-debug
+          name: ScalarAudioForge-ModularSafe-v1.7-installer-safe-clone
           path: dist/*
           if-no-files-found: error
