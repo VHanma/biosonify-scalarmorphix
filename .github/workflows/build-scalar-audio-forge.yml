@@ -35,11 +35,11 @@ jobs:
       - name: Package APK + checksum
         run: |
           mkdir -p dist
-          cp scalar-audio-forge/app/build/outputs/apk/debug/app-debug.apk dist/ScalarAudioForge-v1.3-debug.apk
-          sha256sum dist/ScalarAudioForge-v1.3-debug.apk > dist/ScalarAudioForge-v1.3-debug.apk.sha256
+          cp scalar-audio-forge/app/build/outputs/apk/debug/app-debug.apk dist/ScalarAudioForge-LiveLab-v1.4-clone-debug.apk
+          sha256sum dist/ScalarAudioForge-LiveLab-v1.4-clone-debug.apk > dist/ScalarAudioForge-LiveLab-v1.4-clone-debug.apk.sha256
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: ScalarAudioForge-v1.3-debug
+          name: ScalarAudioForge-LiveLab-v1.4-clone-debug
           path: dist/*
           if-no-files-found: error
