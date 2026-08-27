@@ -177,7 +177,13 @@ object ModularLabOrganizer {
         }
         home.setOnClickListener { spinner.setSelection(0) }
 
-        scroll.addView(shell, ScrollView.LayoutParams(-1, -2))
+        scroll.addView(
+            shell,
+            FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT,
+                FrameLayout.LayoutParams.WRAP_CONTENT
+            )
+        )
         val state = State(scroll, pages, spinner, moduleTitle, moduleSubtitle)
         states[activity] = state
         show(0)
