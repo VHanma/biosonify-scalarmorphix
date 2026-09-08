@@ -1,0 +1,115 @@
+name: Build Chromaforge Standalone APK
+
+on:
+  push:
+    branches:
+      - r3/chromaforge-standalone
+    paths:
+      - 'chromaforge/**'
+      - '.github/workflows/build-chromaforge.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Chromaforge isolated ARM64 release
+    runs-on: ubuntu-latest
+    timeout-minutes: 55
+    defaults:
+      run:
+        working-directory: chromaforge
+    env:
+      CI: '1'
+      EXPO_NO_TELEMETRY: '1'
+      NODE_OPTIONS: '--max-old-space-size=6144'
+
+    steps:
+      - name: Check out build host
+        uses: actions/checkout@v4
+
+      - name: Prove project is isolated from BioSonify runtime
+        shell: bash
+        run: |
+          set -euxo pipefail
+          test -f package.json
+          test -f App.tsx
+          test -f src/forge-engine.ts
+          ! grep -R -E '@/|sonification-store|sonification-engine|BioSonify|app/\(tabs\)|expo-router' App.tsx src package.json app.json
+          grep -q 'com.vhanma.chromaforge' app.json
+          grep -q '"name": "Chromaforge"' app.json
+
+      - name: Set up Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9.12.0
+          run_install: false
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install standalone dependencies
+        run: pnpm install --no-frozen-lockfile
+
+      - name: Expo SDK54 compatibility gate
+        run: pnpm exec expo install --check
+
+      - name: Type-check standalone app
+        run: pnpm run check
+
+      - name: Bundle standalone Android app
+        env:
+          NODE_ENV: production
+        run: pnpm exec expo export --platform android --output-dir dist-android
+
+      - name: Generate standalone native Android project
+        env:
+          NODE_ENV: production
+        run: pnpm exec expo prebuild --platform android --clean
+
+      - name: Build standalone ARM64 release APK
+        working-directory: chromaforge/android
+        env:
+          NODE_ENV: production
+        run: |
+          chmod +x gradlew
+          ./gradlew :app:assembleRelease --no-daemon --stacktrace
+
+      - name: Verify Chromaforge APK identity and internals
+        shell: bash
+        run: |
+          set -euxo pipefail
+          APK=android/app/build/outputs/apk/release/app-release.apk
+          test -f "$APK"
+          cp "$APK" Chromaforge-Standalone-ARM64.apk
+          unzip -t Chromaforge-Standalone-ARM64.apk >/dev/null
+          unzip -l Chromaforge-Standalone-ARM64.apk | grep 'assets/index.android.bundle'
+          unzip -l Chromaforge-Standalone-ARM64.apk | grep 'lib/arm64-v8a/libreactnative.so'
+          "$ANDROID_HOME/build-tools/$(ls "$ANDROID_HOME/build-tools" | sort -V | tail -1)/aapt" dump badging Chromaforge-Standalone-ARM64.apk | tee chromaforge-badging.txt
+          grep -q "package: name='com.vhanma.chromaforge'" chromaforge-badging.txt
+          grep -q "application-label:'Chromaforge'" chromaforge-badging.txt
+          sha256sum Chromaforge-Standalone-ARM64.apk > Chromaforge-Standalone-ARM64-SHA256.txt
+          ls -lh Chromaforge-Standalone-ARM64.apk
+
+      - name: Upload Chromaforge APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: Chromaforge-Standalone-ARM64
+          path: |
+            chromaforge/Chromaforge-Standalone-ARM64.apk
+            chromaforge/Chromaforge-Standalone-ARM64-SHA256.txt
+            chromaforge/chromaforge-badging.txt
+          if-no-files-found: error
+          retention-days: 30
