@@ -13,7 +13,7 @@ export default function TabLayout() {
   return (
     <Tabs
       screenOptions={{
-        tabBarActiveTintColor: "#2ECC9A",
+        tabBarActiveTintColor: "#34E3A4",
         tabBarInactiveTintColor: "#7D8590",
         headerShown: false,
         tabBarButton: HapticTab,
@@ -21,13 +21,13 @@ export default function TabLayout() {
           paddingTop: 8,
           paddingBottom: bottomPadding,
           height: tabBarHeight,
-          backgroundColor: "#161B22",
-          borderTopColor: "#30363D",
+          backgroundColor: "#111820",
+          borderTopColor: "#2A3744",
           borderTopWidth: 0.5,
         },
         tabBarLabelStyle: {
           fontSize: 10,
-          fontWeight: "600",
+          fontWeight: "700",
         },
       }}
     >
@@ -41,12 +41,18 @@ export default function TabLayout() {
         }}
       />
       <Tabs.Screen
-        name="musical"
+        name="image-music"
         options={{
-          title: "Musical",
+          title: "Image Music",
           tabBarIcon: ({ color }) => (
             <IconSymbol size={24} name="music.note" color={color} />
           ),
+        }}
+      />
+      <Tabs.Screen
+        name="musical"
+        options={{
+          href: null,
         }}
       />
       <Tabs.Screen
