@@ -21,8 +21,6 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
-        with:
-          fetch-depth: 1
 
       - name: Set up Java 17
         uses: actions/setup-java@v4
@@ -44,34 +42,50 @@ jobs:
         with:
           gradle-version: '8.9'
 
-      - name: Restore intact sealed V27 Android project from original commit
+      - name: Restore intact sealed V27 through GitHub Contents API
         shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
-          set -euxo pipefail
-          ORIGINAL_V27_COMMIT=3098b2d0c1d85037a14e9cb5f63a1b4b51d95df0
-          ARCHIVE_PATH=build_inputs/BioSonify_COMPLETE_V27_ANDROID_PROJECT.zip.b64
-          git fetch --no-tags --depth=1 origin "$ORIGINAL_V27_COMMIT"
-          git show "$ORIGINAL_V27_COMMIT:$ARCHIVE_PATH" > BioSonify_COMPLETE_V27_ANDROID_PROJECT.original.b64
+          set -euo pipefail
           python3 - <<'PY'
           from pathlib import Path
-          import base64, re
+          import base64, json, os, re, urllib.request
 
-          source = Path('BioSonify_COMPLETE_V27_ANDROID_PROJECT.original.b64').read_bytes()
-          clean = re.sub(rb'[^A-Za-z0-9+/=]', b'', source)
+          commit = '3098b2d0c1d85037a14e9cb5f63a1b4b51d95df0'
+          path = 'build_inputs/BioSonify_COMPLETE_V27_ANDROID_PROJECT.zip.b64'
+          url = f'https://api.github.com/repos/VHanma/biosonify-scalarmorphix/contents/{path}?ref={commit}'
+          req = urllib.request.Request(url, headers={
+              'Authorization': f'Bearer {os.environ["GH_TOKEN"]}',
+              'Accept': 'application/vnd.github+json',
+              'X-GitHub-Api-Version': '2022-11-28',
+              'User-Agent': 'BioSonify-V27-Recovery',
+          })
+          with urllib.request.urlopen(req) as response:
+              payload = json.load(response)
+
+          if payload.get('encoding') != 'base64':
+              raise SystemExit(f'Unexpected GitHub encoding: {payload.get("encoding")}')
+
+          stored_text = base64.b64decode(payload['content'])
+          clean = re.sub(rb'[^A-Za-z0-9+/=]', b'', stored_text)
           clean += b'=' * ((4 - (len(clean) % 4)) % 4)
           decoded = base64.b64decode(clean, validate=False)
+          print(f'GitHub reported size={payload.get("size")} text_bytes={len(stored_text)} zip_bytes={len(decoded)}')
+
           if not decoded.startswith(b'PK'):
-              raise SystemExit('Decoded archive does not start with ZIP PK signature')
+              raise SystemExit('Decoded archive does not begin with ZIP PK signature')
           if b'PK\x05\x06' not in decoded[-65557:]:
-              raise SystemExit('Decoded archive has no ZIP end-of-central-directory signature')
+              raise SystemExit('Decoded archive missing ZIP end-of-central-directory signature')
+
           Path('BioSonify_COMPLETE_V27_ANDROID_PROJECT.zip').write_bytes(decoded)
-          print(f'original source bytes={len(source)} clean_base64={len(clean)} zip_bytes={len(decoded)}')
           PY
           unzip -t BioSonify_COMPLETE_V27_ANDROID_PROJECT.zip
           unzip -q BioSonify_COMPLETE_V27_ANDROID_PROJECT.zip
           test -d BioSonifyCloneAndroid
           test -f BioSonifyCloneAndroid/app/build.gradle
           test -f BioSonifyCloneAndroid/app/src/main/AndroidManifest.xml
+          test -f BioSonifyCloneAndroid/app/src/main/java/com/biosonify/clone/MainActivity.java
 
       - name: Build sealed native debug APK
         shell: bash
