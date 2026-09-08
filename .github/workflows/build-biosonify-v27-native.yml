@@ -47,11 +47,12 @@ permissions:
 jobs:
   build-apk:
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 55
     env:
       CI: '1'
       EXPO_NO_TELEMETRY: '1'
       NODE_OPTIONS: '--max-old-space-size=6144'
+      APP_PACKAGE: 'com.app.image.sonification.biofield.app'
 
     steps:
       - name: Check out real BioSonify source
@@ -86,10 +87,6 @@ jobs:
       - name: Generate native Android project
         run: pnpm exec expo prebuild --platform android --clean
 
-      # IMPORTANT: assembleDebug does not embed the Metro JS bundle. A debug APK
-      # can install successfully and then fail immediately on a normal phone
-      # without a development server. Release embeds the JS/assets and is the
-      # correct one-click standalone package for direct installation.
       - name: Build standalone release APK with embedded JS
         working-directory: android
         run: |
@@ -98,10 +95,36 @@ jobs:
 
       - name: Verify bundled standalone APK and hash it
         run: |
+          set -euxo pipefail
           test -f android/app/build/outputs/apk/release/app-release.apk
           cp android/app/build/outputs/apk/release/app-release.apk BioSonify-STANDALONE-OneClick.apk
+          unzip -l BioSonify-STANDALONE-OneClick.apk | grep 'assets/index.android.bundle'
+          unzip -l BioSonify-STANDALONE-OneClick.apk | grep 'lib/arm64-v8a/libreactnative.so'
           sha256sum BioSonify-STANDALONE-OneClick.apk > BioSonify-STANDALONE-OneClick-SHA256.txt
-          unzip -l BioSonify-STANDALONE-OneClick.apk | grep -E 'index.android.bundle|assets/.*bundle' || true
+
+      - name: Android launch smoke test
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 35
+          arch: x86_64
+          profile: pixel_6
+          disable-animations: true
+          script: |
+            set -euxo pipefail
+            adb install -r BioSonify-STANDALONE-OneClick.apk
+            adb logcat -c
+            adb shell am force-stop "$APP_PACKAGE"
+            adb shell monkey -p "$APP_PACKAGE" -c android.intent.category.LAUNCHER 1
+            sleep 12
+            PID="$(adb shell pidof "$APP_PACKAGE" | tr -d '\r' || true)"
+            echo "BioSonify PID after launch: $PID"
+            if [ -z "$PID" ]; then
+              echo 'BioSonify died during launch. Recent fatal logs:'
+              adb logcat -d -v color | grep -E -i 'FATAL EXCEPTION|AndroidRuntime|ReactNativeJS|SoLoader|hermes|Unable to start activity|com.app.image.sonification.biofield.app' | tail -n 250 || true
+              exit 1
+            fi
+            adb shell dumpsys activity activities | grep -E 'mResumedActivity|topResumedActivity' | tail -n 5 || true
+            adb logcat -d -v color | grep -E -i 'FATAL EXCEPTION|AndroidRuntime|ReactNativeJS|SoLoader|hermes|com.app.image.sonification.biofield.app' | tail -n 150 || true
 
       - name: Upload standalone APK
         uses: actions/upload-artifact@v4
