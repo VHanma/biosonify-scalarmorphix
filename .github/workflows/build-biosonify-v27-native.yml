@@ -46,7 +46,20 @@ jobs:
         shell: bash
         run: |
           set -euxo pipefail
-          base64 --decode build_inputs/BioSonify_COMPLETE_V27_ANDROID_PROJECT.zip.b64 > BioSonify_COMPLETE_V27_ANDROID_PROJECT.zip
+          python3 - <<'PY'
+          from pathlib import Path
+          import base64, re
+
+          source = Path('build_inputs/BioSonify_COMPLETE_V27_ANDROID_PROJECT.zip.b64').read_bytes()
+          clean = re.sub(rb'[^A-Za-z0-9+/=]', b'', source)
+          clean += b'=' * ((4 - (len(clean) % 4)) % 4)
+          decoded = base64.b64decode(clean, validate=False)
+          if not decoded.startswith(b'PK'):
+              raise SystemExit('Decoded archive does not start with ZIP PK signature')
+          Path('BioSonify_COMPLETE_V27_ANDROID_PROJECT.zip').write_bytes(decoded)
+          print(f'archive source bytes={len(source)} clean_base64={len(clean)} zip_bytes={len(decoded)}')
+          PY
+          unzip -t BioSonify_COMPLETE_V27_ANDROID_PROJECT.zip
           unzip -q BioSonify_COMPLETE_V27_ANDROID_PROJECT.zip
           test -d BioSonifyCloneAndroid
           test -f BioSonifyCloneAndroid/app/build.gradle
