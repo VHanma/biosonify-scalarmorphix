@@ -1,4 +1,4 @@
-name: Build BioSonify Fixed Android APK
+name: Build BioSonify Standalone Android APK
 
 on:
   push:
@@ -80,26 +80,35 @@ jobs:
       - name: Install project dependencies
         run: pnpm install --no-frozen-lockfile
 
+      - name: Type-check application
+        run: pnpm run check
+
       - name: Generate native Android project
         run: pnpm exec expo prebuild --platform android --clean
 
-      - name: Build installable debug APK
+      # IMPORTANT: assembleDebug does not embed the Metro JS bundle. A debug APK
+      # can install successfully and then fail immediately on a normal phone
+      # without a development server. Release embeds the JS/assets and is the
+      # correct one-click standalone package for direct installation.
+      - name: Build standalone release APK with embedded JS
         working-directory: android
         run: |
           chmod +x gradlew
-          ./gradlew :app:assembleDebug --no-daemon --stacktrace
+          ./gradlew :app:assembleRelease --no-daemon --stacktrace
 
-      - name: Name and hash finished APK
+      - name: Verify bundled standalone APK and hash it
         run: |
-          cp android/app/build/outputs/apk/debug/app-debug.apk BioSonify-FIXED-OneClick.apk
-          sha256sum BioSonify-FIXED-OneClick.apk > BioSonify-FIXED-OneClick-SHA256.txt
+          test -f android/app/build/outputs/apk/release/app-release.apk
+          cp android/app/build/outputs/apk/release/app-release.apk BioSonify-STANDALONE-OneClick.apk
+          sha256sum BioSonify-STANDALONE-OneClick.apk > BioSonify-STANDALONE-OneClick-SHA256.txt
+          unzip -l BioSonify-STANDALONE-OneClick.apk | grep -E 'index.android.bundle|assets/.*bundle' || true
 
-      - name: Upload installable fixed APK
+      - name: Upload standalone APK
         uses: actions/upload-artifact@v4
         with:
-          name: BioSonify-FIXED-OneClick
+          name: BioSonify-STANDALONE-OneClick
           path: |
-            BioSonify-FIXED-OneClick.apk
-            BioSonify-FIXED-OneClick-SHA256.txt
+            BioSonify-STANDALONE-OneClick.apk
+            BioSonify-STANDALONE-OneClick-SHA256.txt
           if-no-files-found: error
           retention-days: 30
