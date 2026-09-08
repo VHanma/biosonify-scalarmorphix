@@ -1,25 +1,6 @@
-name: Build BioSonify Standalone Android APK
+name: Build BioSonify Crash Isolation APKs
 
 on:
-  push:
-    branches:
-      - main
-    paths:
-      - app/**
-      - assets/**
-      - components/**
-      - constants/**
-      - hooks/**
-      - lib/**
-      - scripts/**
-      - app.config.ts
-      - babel.config.js
-      - metro.config.js
-      - package.json
-      - pnpm-lock.yaml
-      - tsconfig.json
-      - build_inputs/BioSonify-FIXED-TRIGGER.txt
-      - .github/workflows/build-biosonify-v27-native.yml
   pull_request:
     branches:
       - main
@@ -45,18 +26,21 @@ permissions:
   contents: read
 
 jobs:
-  build-apk:
+  baseline-control:
+    name: Baseline main control APK
     runs-on: ubuntu-latest
-    timeout-minutes: 55
+    timeout-minutes: 45
     env:
       CI: '1'
+      NODE_ENV: production
       EXPO_NO_TELEMETRY: '1'
       NODE_OPTIONS: '--max-old-space-size=6144'
-      APP_PACKAGE: 'com.app.image.sonification.biofield.app'
 
     steps:
-      - name: Check out real BioSonify source
+      - name: Check out untouched main
         uses: actions/checkout@v4
+        with:
+          ref: main
 
       - name: Set up Node 22
         uses: actions/setup-node@v4
@@ -78,60 +62,139 @@ jobs:
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
 
-      - name: Install project dependencies
+      - name: Install dependencies
         run: pnpm install --no-frozen-lockfile
 
-      - name: Type-check application
+      - name: Type-check baseline
         run: pnpm run check
 
-      - name: Generate native Android project
+      - name: Generate native Android baseline
         run: pnpm exec expo prebuild --platform android --clean
 
-      - name: Build standalone release APK with embedded JS
+      - name: Build ARM64 standalone baseline
         working-directory: android
         run: |
           chmod +x gradlew
-          ./gradlew :app:assembleRelease --no-daemon --stacktrace
+          ./gradlew :app:assembleRelease -PreactNativeArchitectures=arm64-v8a --no-daemon --stacktrace
 
-      - name: Verify bundled standalone APK and hash it
+      - name: Verify and name baseline APK
         run: |
           set -euxo pipefail
-          test -f android/app/build/outputs/apk/release/app-release.apk
-          cp android/app/build/outputs/apk/release/app-release.apk BioSonify-STANDALONE-OneClick.apk
-          unzip -l BioSonify-STANDALONE-OneClick.apk | grep 'assets/index.android.bundle'
-          unzip -l BioSonify-STANDALONE-OneClick.apk | grep 'lib/arm64-v8a/libreactnative.so'
-          sha256sum BioSonify-STANDALONE-OneClick.apk > BioSonify-STANDALONE-OneClick-SHA256.txt
+          APK=android/app/build/outputs/apk/release/app-release.apk
+          test -f "$APK"
+          cp "$APK" BioSonify-BASELINE-Control-ARM64.apk
+          unzip -l BioSonify-BASELINE-Control-ARM64.apk | grep 'assets/index.android.bundle'
+          unzip -l BioSonify-BASELINE-Control-ARM64.apk | grep 'lib/arm64-v8a/libreactnative.so'
+          sha256sum BioSonify-BASELINE-Control-ARM64.apk > BioSonify-BASELINE-Control-ARM64-SHA256.txt
 
-      - name: Android launch smoke test
-        uses: reactivecircus/android-emulator-runner@v2
-        with:
-          api-level: 35
-          arch: x86_64
-          profile: pixel_6
-          disable-animations: true
-          script: |
-            set -euxo pipefail
-            adb install -r BioSonify-STANDALONE-OneClick.apk
-            adb logcat -c
-            adb shell am force-stop "$APP_PACKAGE"
-            adb shell monkey -p "$APP_PACKAGE" -c android.intent.category.LAUNCHER 1
-            sleep 12
-            PID="$(adb shell pidof "$APP_PACKAGE" | tr -d '\r' || true)"
-            echo "BioSonify PID after launch: $PID"
-            if [ -z "$PID" ]; then
-              echo 'BioSonify died during launch. Recent fatal logs:'
-              adb logcat -d -v color | grep -E -i 'FATAL EXCEPTION|AndroidRuntime|ReactNativeJS|SoLoader|hermes|Unable to start activity|com.app.image.sonification.biofield.app' | tail -n 250 || true
-              exit 1
-            fi
-            adb shell dumpsys activity activities | grep -E 'mResumedActivity|topResumedActivity' | tail -n 5 || true
-            adb logcat -d -v color | grep -E -i 'FATAL EXCEPTION|AndroidRuntime|ReactNativeJS|SoLoader|hermes|com.app.image.sonification.biofield.app' | tail -n 150 || true
-
-      - name: Upload standalone APK
+      - name: Upload baseline control
         uses: actions/upload-artifact@v4
         with:
-          name: BioSonify-STANDALONE-OneClick
+          name: BioSonify-BASELINE-Control-ARM64
           path: |
-            BioSonify-STANDALONE-OneClick.apk
-            BioSonify-STANDALONE-OneClick-SHA256.txt
+            BioSonify-BASELINE-Control-ARM64.apk
+            BioSonify-BASELINE-Control-ARM64-SHA256.txt
+          if-no-files-found: error
+          retention-days: 30
+
+  musical-safe-boot:
+    name: Musical branch safe-boot APK
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      CI: '1'
+      NODE_ENV: production
+      EXPO_NO_TELEMETRY: '1'
+      NODE_OPTIONS: '--max-old-space-size=6144'
+
+    steps:
+      - name: Check out Musical branch
+        uses: actions/checkout@v4
+        with:
+          ref: r3/erinspace-musical-sonify
+
+      - name: Remove Musical route from startup for isolation
+        run: |
+          set -euxo pipefail
+          mkdir -p diagnostic-disabled
+          mv 'app/(tabs)/musical.tsx' diagnostic-disabled/musical.tsx.disabled
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('app/(tabs)/_layout.tsx')
+          s = p.read_text()
+          block = '''      <Tabs.Screen
+                name="musical"
+                options={{
+                  title: "Musical",
+                  tabBarIcon: ({ color }) => (
+                    <IconSymbol size={24} name="music.note" color={color} />
+                  ),
+                }}
+              />
+          '''
+          if block not in s:
+              raise SystemExit('Musical tab block not found; refusing ambiguous diagnostic build')
+          p.write_text(s.replace(block, '', 1))
+          PY
+          test ! -f 'app/(tabs)/musical.tsx'
+          ! grep -q 'name="musical"' 'app/(tabs)/_layout.tsx'
+
+      - name: Set up Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: '9.12.0'
+          run_install: false
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install dependencies
+        run: pnpm install --no-frozen-lockfile
+
+      - name: Type-check safe-boot source
+        run: pnpm run check
+
+      - name: Generate native Android safe-boot
+        run: pnpm exec expo prebuild --platform android --clean
+
+      - name: Build ARM64 standalone safe-boot
+        working-directory: android
+        run: |
+          chmod +x gradlew
+          ./gradlew :app:assembleRelease -PreactNativeArchitectures=arm64-v8a --no-daemon --stacktrace
+
+      - name: Verify Musical code is absent from startup bundle
+        run: |
+          set -euxo pipefail
+          APK=android/app/build/outputs/apk/release/app-release.apk
+          test -f "$APK"
+          cp "$APK" BioSonify-MUSICAL-SafeBoot-ARM64.apk
+          unzip -l BioSonify-MUSICAL-SafeBoot-ARM64.apk | grep 'assets/index.android.bundle'
+          unzip -l BioSonify-MUSICAL-SafeBoot-ARM64.apk | grep 'lib/arm64-v8a/libreactnative.so'
+          unzip -p BioSonify-MUSICAL-SafeBoot-ARM64.apk assets/index.android.bundle > /tmp/biosonify.bundle
+          if grep -a -q 'ERINSPACE ENGINE' /tmp/biosonify.bundle; then
+            echo 'Musical route unexpectedly remained in the startup bundle'
+            exit 1
+          fi
+          sha256sum BioSonify-MUSICAL-SafeBoot-ARM64.apk > BioSonify-MUSICAL-SafeBoot-ARM64-SHA256.txt
+
+      - name: Upload Musical safe-boot
+        uses: actions/upload-artifact@v4
+        with:
+          name: BioSonify-MUSICAL-SafeBoot-ARM64
+          path: |
+            BioSonify-MUSICAL-SafeBoot-ARM64.apk
+            BioSonify-MUSICAL-SafeBoot-ARM64-SHA256.txt
           if-no-files-found: error
           retention-days: 30
