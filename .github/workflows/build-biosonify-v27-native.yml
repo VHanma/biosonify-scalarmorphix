@@ -1,11 +1,22 @@
-name: Build BioSonify Sealed Native V27 APK
+name: Build BioSonify SDK54 Verified APK
 
 on:
   pull_request:
     branches:
       - main
     paths:
-      - build_inputs/BioSonify_COMPLETE_V27_ANDROID_PROJECT.zip.b64
+      - app/**
+      - assets/**
+      - components/**
+      - constants/**
+      - hooks/**
+      - lib/**
+      - package.json
+      - pnpm-lock.yaml
+      - app.config.ts
+      - babel.config.js
+      - metro.config.js
+      - tsconfig.json
       - .github/workflows/build-biosonify-v27-native.yml
   workflow_dispatch:
 
@@ -13,14 +24,29 @@ permissions:
   contents: read
 
 jobs:
-  build-native-v27:
-    name: Sealed native V27 APK
+  build-apk:
+    name: SDK54 compatibility-gated release APK
     runs-on: ubuntu-latest
-    timeout-minutes: 35
+    timeout-minutes: 55
+    env:
+      CI: '1'
+      EXPO_NO_TELEMETRY: '1'
+      NODE_OPTIONS: '--max-old-space-size=6144'
 
     steps:
-      - name: Check out repository
+      - name: Check out BioSonify source
         uses: actions/checkout@v4
+
+      - name: Set up Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: '9.12.0'
+          run_install: false
 
       - name: Set up Java 17
         uses: actions/setup-java@v4
@@ -31,87 +57,58 @@ jobs:
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
 
-      - name: Install Android 35 build components
-        shell: bash
-        run: |
-          yes | sdkmanager --licenses >/dev/null || true
-          sdkmanager "platform-tools" "platforms;android-35" "build-tools;35.0.0"
+      - name: Install all dependencies
+        run: pnpm install --no-frozen-lockfile
 
-      - name: Set up Gradle 8.9
-        uses: gradle/actions/setup-gradle@v4
-        with:
-          gradle-version: '8.9'
-
-      - name: Restore intact sealed V27 through GitHub Contents API
-        shell: bash
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-          python3 - <<'PY'
-          from pathlib import Path
-          import base64, json, os, re, urllib.request
-
-          commit = '3098b2d0c1d85037a14e9cb5f63a1b4b51d95df0'
-          path = 'build_inputs/BioSonify_COMPLETE_V27_ANDROID_PROJECT.zip.b64'
-          url = f'https://api.github.com/repos/VHanma/biosonify-scalarmorphix/contents/{path}?ref={commit}'
-          req = urllib.request.Request(url, headers={
-              'Authorization': f'Bearer {os.environ["GH_TOKEN"]}',
-              'Accept': 'application/vnd.github+json',
-              'X-GitHub-Api-Version': '2022-11-28',
-              'User-Agent': 'BioSonify-V27-Recovery',
-          })
-          with urllib.request.urlopen(req) as response:
-              payload = json.load(response)
-
-          if payload.get('encoding') != 'base64':
-              raise SystemExit(f'Unexpected GitHub encoding: {payload.get("encoding")}')
-
-          stored_text = base64.b64decode(payload['content'])
-          clean = re.sub(rb'[^A-Za-z0-9+/=]', b'', stored_text)
-          clean += b'=' * ((4 - (len(clean) % 4)) % 4)
-          decoded = base64.b64decode(clean, validate=False)
-          print(f'GitHub reported size={payload.get("size")} text_bytes={len(stored_text)} zip_bytes={len(decoded)}')
-
-          if not decoded.startswith(b'PK'):
-              raise SystemExit('Decoded archive does not begin with ZIP PK signature')
-          if b'PK\x05\x06' not in decoded[-65557:]:
-              raise SystemExit('Decoded archive missing ZIP end-of-central-directory signature')
-
-          Path('BioSonify_COMPLETE_V27_ANDROID_PROJECT.zip').write_bytes(decoded)
-          PY
-          unzip -t BioSonify_COMPLETE_V27_ANDROID_PROJECT.zip
-          unzip -q BioSonify_COMPLETE_V27_ANDROID_PROJECT.zip
-          test -d BioSonifyCloneAndroid
-          test -f BioSonifyCloneAndroid/app/build.gradle
-          test -f BioSonifyCloneAndroid/app/src/main/AndroidManifest.xml
-          test -f BioSonifyCloneAndroid/app/src/main/java/com/biosonify/clone/MainActivity.java
-
-      - name: Build sealed native debug APK
-        shell: bash
-        run: |
-          set -o pipefail
-          cd BioSonifyCloneAndroid
-          gradle --no-daemon --stacktrace :app:assembleDebug 2>&1 | tee ../biosonify-native-build.log
-
-      - name: Verify and hash sealed APK
+      - name: Prove document picker is SDK54 compatible
         shell: bash
         run: |
           set -euxo pipefail
-          APK=BioSonifyCloneAndroid/app/build/outputs/apk/debug/app-debug.apk
-          test -f "$APK"
-          cp "$APK" BioSonify-V27-SEALED-NATIVE.apk
-          unzip -t BioSonify-V27-SEALED-NATIVE.apk >/dev/null
-          sha256sum BioSonify-V27-SEALED-NATIVE.apk > BioSonify-V27-SEALED-NATIVE-SHA256.txt
-          ls -lh BioSonify-V27-SEALED-NATIVE.apk
+          node -e "const p=require('./node_modules/expo-document-picker/package.json'); console.log('expo-document-picker',p.version); if(!p.version.startsWith('14.')) process.exit(1)"
 
-      - name: Upload sealed native APK
+      - name: Expo SDK dependency compatibility gate
+        run: pnpm exec expo install --check
+
+      - name: Type-check application
+        run: pnpm run check
+
+      - name: Bundle every Android route before native build
+        env:
+          NODE_ENV: production
+        run: pnpm exec expo export --platform android --output-dir dist-android-export
+
+      - name: Generate SDK54 native Android project
+        env:
+          NODE_ENV: production
+        run: pnpm exec expo prebuild --platform android --clean
+
+      - name: Build standalone release APK with embedded JS
+        working-directory: android
+        env:
+          NODE_ENV: production
+        run: |
+          chmod +x gradlew
+          ./gradlew :app:assembleRelease --no-daemon --stacktrace
+
+      - name: Verify APK internals and hash
+        shell: bash
+        run: |
+          set -euxo pipefail
+          APK=android/app/build/outputs/apk/release/app-release.apk
+          test -f "$APK"
+          cp "$APK" BioSonify-SDK54-FIXED.apk
+          unzip -t BioSonify-SDK54-FIXED.apk >/dev/null
+          unzip -l BioSonify-SDK54-FIXED.apk | grep 'assets/index.android.bundle'
+          unzip -l BioSonify-SDK54-FIXED.apk | grep 'lib/arm64-v8a/libreactnative.so'
+          sha256sum BioSonify-SDK54-FIXED.apk > BioSonify-SDK54-FIXED-SHA256.txt
+          ls -lh BioSonify-SDK54-FIXED.apk
+
+      - name: Upload verified APK
         uses: actions/upload-artifact@v4
         with:
-          name: BioSonify-V27-SEALED-NATIVE
+          name: BioSonify-SDK54-FIXED
           path: |
-            BioSonify-V27-SEALED-NATIVE.apk
-            BioSonify-V27-SEALED-NATIVE-SHA256.txt
-            biosonify-native-build.log
+            BioSonify-SDK54-FIXED.apk
+            BioSonify-SDK54-FIXED-SHA256.txt
           if-no-files-found: error
           retention-days: 30
