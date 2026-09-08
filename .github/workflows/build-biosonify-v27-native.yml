@@ -1,24 +1,11 @@
-name: Build BioSonify Crash Isolation APKs
+name: Build BioSonify Sealed Native V27 APK
 
 on:
   pull_request:
     branches:
       - main
     paths:
-      - app/**
-      - assets/**
-      - components/**
-      - constants/**
-      - hooks/**
-      - lib/**
-      - scripts/**
-      - app.config.ts
-      - babel.config.js
-      - metro.config.js
-      - package.json
-      - pnpm-lock.yaml
-      - tsconfig.json
-      - build_inputs/BioSonify-FIXED-TRIGGER.txt
+      - build_inputs/BioSonify_COMPLETE_V27_ANDROID_PROJECT.zip.b64
       - .github/workflows/build-biosonify-v27-native.yml
   workflow_dispatch:
 
@@ -26,31 +13,14 @@ permissions:
   contents: read
 
 jobs:
-  baseline-control:
-    name: Baseline main control APK
+  build-native-v27:
+    name: Sealed native V27 APK
     runs-on: ubuntu-latest
-    timeout-minutes: 45
-    env:
-      CI: '1'
-      EXPO_NO_TELEMETRY: '1'
-      NODE_OPTIONS: '--max-old-space-size=6144'
+    timeout-minutes: 35
 
     steps:
-      - name: Check out untouched main
+      - name: Check out repository
         uses: actions/checkout@v4
-        with:
-          ref: main
-
-      - name: Set up Node 22
-        uses: actions/setup-node@v4
-        with:
-          node-version: '22'
-
-      - name: Set up pnpm
-        uses: pnpm/action-setup@v4
-        with:
-          version: '9.12.0'
-          run_install: false
 
       - name: Set up Java 17
         uses: actions/setup-java@v4
@@ -61,139 +31,51 @@ jobs:
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
 
-      - name: Install dependencies including dev tooling
-        run: pnpm install --no-frozen-lockfile
-
-      - name: Type-check baseline
-        run: pnpm run check
-
-      - name: Generate native Android baseline
-        env:
-          NODE_ENV: production
-        run: pnpm exec expo prebuild --platform android --clean
-
-      - name: Build ARM64 standalone baseline
-        working-directory: android
-        env:
-          NODE_ENV: production
+      - name: Install Android 35 build components
+        shell: bash
         run: |
-          chmod +x gradlew
-          ./gradlew :app:assembleRelease -PreactNativeArchitectures=arm64-v8a --no-daemon --stacktrace
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager "platform-tools" "platforms;android-35" "build-tools;35.0.0"
 
-      - name: Verify and name baseline APK
+      - name: Set up Gradle 8.9
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+
+      - name: Restore sealed native Android project
+        shell: bash
         run: |
           set -euxo pipefail
-          APK=android/app/build/outputs/apk/release/app-release.apk
-          test -f "$APK"
-          cp "$APK" BioSonify-BASELINE-Control-ARM64.apk
-          unzip -l BioSonify-BASELINE-Control-ARM64.apk | grep 'assets/index.android.bundle'
-          unzip -l BioSonify-BASELINE-Control-ARM64.apk | grep 'lib/arm64-v8a/libreactnative.so'
-          sha256sum BioSonify-BASELINE-Control-ARM64.apk > BioSonify-BASELINE-Control-ARM64-SHA256.txt
+          base64 --decode build_inputs/BioSonify_COMPLETE_V27_ANDROID_PROJECT.zip.b64 > BioSonify_COMPLETE_V27_ANDROID_PROJECT.zip
+          unzip -q BioSonify_COMPLETE_V27_ANDROID_PROJECT.zip
+          test -d BioSonifyCloneAndroid
+          test -f BioSonifyCloneAndroid/app/build.gradle
 
-      - name: Upload baseline control
+      - name: Build sealed native debug APK
+        shell: bash
+        run: |
+          set -o pipefail
+          cd BioSonifyCloneAndroid
+          gradle --no-daemon --stacktrace :app:assembleDebug 2>&1 | tee ../biosonify-native-build.log
+
+      - name: Verify and hash sealed APK
+        shell: bash
+        run: |
+          set -euxo pipefail
+          APK=BioSonifyCloneAndroid/app/build/outputs/apk/debug/app-debug.apk
+          test -f "$APK"
+          cp "$APK" BioSonify-V27-SEALED-NATIVE.apk
+          unzip -t BioSonify-V27-SEALED-NATIVE.apk >/dev/null
+          sha256sum BioSonify-V27-SEALED-NATIVE.apk > BioSonify-V27-SEALED-NATIVE-SHA256.txt
+          ls -lh BioSonify-V27-SEALED-NATIVE.apk
+
+      - name: Upload sealed native APK
         uses: actions/upload-artifact@v4
         with:
-          name: BioSonify-BASELINE-Control-ARM64
+          name: BioSonify-V27-SEALED-NATIVE
           path: |
-            BioSonify-BASELINE-Control-ARM64.apk
-            BioSonify-BASELINE-Control-ARM64-SHA256.txt
-          if-no-files-found: error
-          retention-days: 30
-
-  musical-safe-boot:
-    name: Musical branch safe-boot APK
-    runs-on: ubuntu-latest
-    timeout-minutes: 45
-    env:
-      CI: '1'
-      EXPO_NO_TELEMETRY: '1'
-      NODE_OPTIONS: '--max-old-space-size=6144'
-
-    steps:
-      - name: Check out Musical branch
-        uses: actions/checkout@v4
-        with:
-          ref: r3/erinspace-musical-sonify
-
-      - name: Remove Musical route from startup for isolation
-        run: |
-          set -euxo pipefail
-          mkdir -p diagnostic-disabled
-          mv 'app/(tabs)/musical.tsx' diagnostic-disabled/musical.tsx.disabled
-          python3 - <<'PY'
-          import re
-          from pathlib import Path
-          p = Path('app/(tabs)/_layout.tsx')
-          s = p.read_text()
-          pattern = r'\n      <Tabs\.Screen\n        name="musical"\n        options=\{\{.*?\n      />\n'
-          out, count = re.subn(pattern, '\n', s, count=1, flags=re.S)
-          if count != 1:
-              raise SystemExit(f'Expected exactly one Musical tab block, removed {count}')
-          p.write_text(out)
-          PY
-          test ! -f 'app/(tabs)/musical.tsx'
-          ! grep -q 'name="musical"' 'app/(tabs)/_layout.tsx'
-
-      - name: Set up Node 22
-        uses: actions/setup-node@v4
-        with:
-          node-version: '22'
-
-      - name: Set up pnpm
-        uses: pnpm/action-setup@v4
-        with:
-          version: '9.12.0'
-          run_install: false
-
-      - name: Set up Java 17
-        uses: actions/setup-java@v4
-        with:
-          distribution: temurin
-          java-version: '17'
-
-      - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
-
-      - name: Install dependencies including dev tooling
-        run: pnpm install --no-frozen-lockfile
-
-      - name: Type-check safe-boot source
-        run: pnpm run check
-
-      - name: Generate native Android safe-boot
-        env:
-          NODE_ENV: production
-        run: pnpm exec expo prebuild --platform android --clean
-
-      - name: Build ARM64 standalone safe-boot
-        working-directory: android
-        env:
-          NODE_ENV: production
-        run: |
-          chmod +x gradlew
-          ./gradlew :app:assembleRelease -PreactNativeArchitectures=arm64-v8a --no-daemon --stacktrace
-
-      - name: Verify Musical code is absent from startup bundle
-        run: |
-          set -euxo pipefail
-          APK=android/app/build/outputs/apk/release/app-release.apk
-          test -f "$APK"
-          cp "$APK" BioSonify-MUSICAL-SafeBoot-ARM64.apk
-          unzip -l BioSonify-MUSICAL-SafeBoot-ARM64.apk | grep 'assets/index.android.bundle'
-          unzip -l BioSonify-MUSICAL-SafeBoot-ARM64.apk | grep 'lib/arm64-v8a/libreactnative.so'
-          unzip -p BioSonify-MUSICAL-SafeBoot-ARM64.apk assets/index.android.bundle > /tmp/biosonify.bundle
-          if grep -a -q 'ERINSPACE ENGINE' /tmp/biosonify.bundle; then
-            echo 'Musical route unexpectedly remained in the startup bundle'
-            exit 1
-          fi
-          sha256sum BioSonify-MUSICAL-SafeBoot-ARM64.apk > BioSonify-MUSICAL-SafeBoot-ARM64-SHA256.txt
-
-      - name: Upload Musical safe-boot
-        uses: actions/upload-artifact@v4
-        with:
-          name: BioSonify-MUSICAL-SafeBoot-ARM64
-          path: |
-            BioSonify-MUSICAL-SafeBoot-ARM64.apk
-            BioSonify-MUSICAL-SafeBoot-ARM64-SHA256.txt
+            BioSonify-V27-SEALED-NATIVE.apk
+            BioSonify-V27-SEALED-NATIVE-SHA256.txt
+            biosonify-native-build.log
           if-no-files-found: error
           retention-days: 30
