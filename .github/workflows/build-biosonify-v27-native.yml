@@ -21,6 +21,8 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
 
       - name: Set up Java 17
         uses: actions/setup-java@v4
@@ -42,27 +44,34 @@ jobs:
         with:
           gradle-version: '8.9'
 
-      - name: Restore sealed native Android project
+      - name: Restore intact sealed V27 Android project from original commit
         shell: bash
         run: |
           set -euxo pipefail
+          ORIGINAL_V27_COMMIT=3098b2d0c1d85037a14e9cb5f63a1b4b51d95df0
+          ARCHIVE_PATH=build_inputs/BioSonify_COMPLETE_V27_ANDROID_PROJECT.zip.b64
+          git fetch --no-tags --depth=1 origin "$ORIGINAL_V27_COMMIT"
+          git show "$ORIGINAL_V27_COMMIT:$ARCHIVE_PATH" > BioSonify_COMPLETE_V27_ANDROID_PROJECT.original.b64
           python3 - <<'PY'
           from pathlib import Path
           import base64, re
 
-          source = Path('build_inputs/BioSonify_COMPLETE_V27_ANDROID_PROJECT.zip.b64').read_bytes()
+          source = Path('BioSonify_COMPLETE_V27_ANDROID_PROJECT.original.b64').read_bytes()
           clean = re.sub(rb'[^A-Za-z0-9+/=]', b'', source)
           clean += b'=' * ((4 - (len(clean) % 4)) % 4)
           decoded = base64.b64decode(clean, validate=False)
           if not decoded.startswith(b'PK'):
               raise SystemExit('Decoded archive does not start with ZIP PK signature')
+          if b'PK\x05\x06' not in decoded[-65557:]:
+              raise SystemExit('Decoded archive has no ZIP end-of-central-directory signature')
           Path('BioSonify_COMPLETE_V27_ANDROID_PROJECT.zip').write_bytes(decoded)
-          print(f'archive source bytes={len(source)} clean_base64={len(clean)} zip_bytes={len(decoded)}')
+          print(f'original source bytes={len(source)} clean_base64={len(clean)} zip_bytes={len(decoded)}')
           PY
           unzip -t BioSonify_COMPLETE_V27_ANDROID_PROJECT.zip
           unzip -q BioSonify_COMPLETE_V27_ANDROID_PROJECT.zip
           test -d BioSonifyCloneAndroid
           test -f BioSonifyCloneAndroid/app/build.gradle
+          test -f BioSonifyCloneAndroid/app/src/main/AndroidManifest.xml
 
       - name: Build sealed native debug APK
         shell: bash
