@@ -119,22 +119,15 @@ jobs:
           mkdir -p diagnostic-disabled
           mv 'app/(tabs)/musical.tsx' diagnostic-disabled/musical.tsx.disabled
           python3 - <<'PY'
+          import re
           from pathlib import Path
           p = Path('app/(tabs)/_layout.tsx')
           s = p.read_text()
-          block = '''      <Tabs.Screen
-                name="musical"
-                options={{
-                  title: "Musical",
-                  tabBarIcon: ({ color }) => (
-                    <IconSymbol size={24} name="music.note" color={color} />
-                  ),
-                }}
-              />
-          '''
-          if block not in s:
-              raise SystemExit('Musical tab block not found; refusing ambiguous diagnostic build')
-          p.write_text(s.replace(block, '', 1))
+          pattern = r'\n      <Tabs\.Screen\n        name="musical"\n        options=\{\{.*?\n      />\n'
+          out, count = re.subn(pattern, '\n', s, count=1, flags=re.S)
+          if count != 1:
+              raise SystemExit(f'Expected exactly one Musical tab block, removed {count}')
+          p.write_text(out)
           PY
           test ! -f 'app/(tabs)/musical.tsx'
           ! grep -q 'name="musical"' 'app/(tabs)/_layout.tsx'
