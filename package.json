@@ -34,11 +34,11 @@
     "cookie": "^1.1.1",
     "dotenv": "^16.6.1",
     "drizzle-orm": "^0.44.7",
-    "expo": "~54.0.35",
+    "expo": "~54.0.37",
     "expo-audio": "~1.1.1",
     "expo-build-properties": "^1.0.10",
-    "expo-constants": "~18.0.13",
-    "expo-document-picker": "^57.0.0",
+    "expo-constants": "~18.0.14",
+    "expo-document-picker": "~14.0.8",
     "expo-font": "~14.0.12",
     "expo-haptics": "~15.0.8",
     "expo-image": "~3.0.11",
@@ -95,6 +95,11 @@
     "tsx": "^4.21.0",
     "typescript": "~5.9.3",
     "vitest": "^2.1.9"
+  },
+  "pnpm": {
+    "overrides": {
+      "@react-navigation/native": "7.1.25"
+    }
   },
   "packageManager": "pnpm@9.12.0"
 }

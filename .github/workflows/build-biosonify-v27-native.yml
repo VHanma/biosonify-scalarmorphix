@@ -1,25 +1,6 @@
-name: Build BioSonify Fixed Android APK
+name: Build BioSonify SDK54 Verified APK
 
 on:
-  push:
-    branches:
-      - main
-    paths:
-      - app/**
-      - assets/**
-      - components/**
-      - constants/**
-      - hooks/**
-      - lib/**
-      - scripts/**
-      - app.config.ts
-      - babel.config.js
-      - metro.config.js
-      - package.json
-      - pnpm-lock.yaml
-      - tsconfig.json
-      - build_inputs/BioSonify-FIXED-TRIGGER.txt
-      - .github/workflows/build-biosonify-v27-native.yml
   pull_request:
     branches:
       - main
@@ -30,14 +11,12 @@ on:
       - constants/**
       - hooks/**
       - lib/**
-      - scripts/**
+      - package.json
+      - pnpm-lock.yaml
       - app.config.ts
       - babel.config.js
       - metro.config.js
-      - package.json
-      - pnpm-lock.yaml
       - tsconfig.json
-      - build_inputs/BioSonify-FIXED-TRIGGER.txt
       - .github/workflows/build-biosonify-v27-native.yml
   workflow_dispatch:
 
@@ -46,15 +25,16 @@ permissions:
 
 jobs:
   build-apk:
+    name: SDK54 compatibility-gated release APK
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 55
     env:
       CI: '1'
       EXPO_NO_TELEMETRY: '1'
       NODE_OPTIONS: '--max-old-space-size=6144'
 
     steps:
-      - name: Check out real BioSonify source
+      - name: Check out BioSonify source
         uses: actions/checkout@v4
 
       - name: Set up Node 22
@@ -77,29 +57,58 @@ jobs:
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
 
-      - name: Install project dependencies
+      - name: Install all dependencies
         run: pnpm install --no-frozen-lockfile
 
-      - name: Generate native Android project
+      - name: Prove document picker is SDK54 compatible
+        shell: bash
+        run: |
+          set -euxo pipefail
+          node -e "const p=require('./node_modules/expo-document-picker/package.json'); console.log('expo-document-picker',p.version); if(!p.version.startsWith('14.')) process.exit(1)"
+
+      - name: Expo SDK dependency compatibility gate
+        run: pnpm exec expo install --check
+
+      - name: Type-check application
+        run: pnpm run check
+
+      - name: Bundle every Android route before native build
+        env:
+          NODE_ENV: production
+        run: pnpm exec expo export --platform android --output-dir dist-android-export
+
+      - name: Generate SDK54 native Android project
+        env:
+          NODE_ENV: production
         run: pnpm exec expo prebuild --platform android --clean
 
-      - name: Build installable debug APK
+      - name: Build standalone release APK with embedded JS
         working-directory: android
+        env:
+          NODE_ENV: production
         run: |
           chmod +x gradlew
-          ./gradlew :app:assembleDebug --no-daemon --stacktrace
+          ./gradlew :app:assembleRelease --no-daemon --stacktrace
 
-      - name: Name and hash finished APK
+      - name: Verify APK internals and hash
+        shell: bash
         run: |
-          cp android/app/build/outputs/apk/debug/app-debug.apk BioSonify-FIXED-OneClick.apk
-          sha256sum BioSonify-FIXED-OneClick.apk > BioSonify-FIXED-OneClick-SHA256.txt
+          set -euxo pipefail
+          APK=android/app/build/outputs/apk/release/app-release.apk
+          test -f "$APK"
+          cp "$APK" BioSonify-SDK54-FIXED.apk
+          unzip -t BioSonify-SDK54-FIXED.apk >/dev/null
+          unzip -l BioSonify-SDK54-FIXED.apk | grep 'assets/index.android.bundle'
+          unzip -l BioSonify-SDK54-FIXED.apk | grep 'lib/arm64-v8a/libreactnative.so'
+          sha256sum BioSonify-SDK54-FIXED.apk > BioSonify-SDK54-FIXED-SHA256.txt
+          ls -lh BioSonify-SDK54-FIXED.apk
 
-      - name: Upload installable fixed APK
+      - name: Upload verified APK
         uses: actions/upload-artifact@v4
         with:
-          name: BioSonify-FIXED-OneClick
+          name: BioSonify-SDK54-FIXED
           path: |
-            BioSonify-FIXED-OneClick.apk
-            BioSonify-FIXED-OneClick-SHA256.txt
+            BioSonify-SDK54-FIXED.apk
+            BioSonify-SDK54-FIXED-SHA256.txt
           if-no-files-found: error
           retention-days: 30

@@ -9,29 +9,23 @@ import type { ExpoConfig } from "expo/config";
 const rawBundleId = "com.app.image_sonification_biofield_app";
 const bundleId =
   rawBundleId
-    .replace(/[-_]/g, ".") // Replace hyphens/underscores with dots
-    .replace(/[^a-zA-Z0-9.]/g, "") // Remove invalid chars
-    .replace(/\.+/g, ".") // Collapse consecutive dots
-    .replace(/^\.+|\.+$/g, "") // Trim leading/trailing dots
+    .replace(/[-_]/g, ".")
+    .replace(/[^a-zA-Z0-9.]/g, "")
+    .replace(/\.+/g, ".")
+    .replace(/^\.+|\.+$/g, "")
     .toLowerCase()
     .split(".")
     .map((segment) => {
-      // Android requires each segment to start with a letter
-      // Prefix with 'x' if segment starts with a digit
       return /^[a-zA-Z]/.test(segment) ? segment : "x" + segment;
     })
     .join(".") || "space.manus.app";
-// Extract timestamp from bundle ID and prefix with "manus" for deep link scheme
-// e.g., "space.manus.my.app.t20240115103045" -> "manus20240115103045"
+
 const timestamp = bundleId.split(".").pop()?.replace(/^t/, "") ?? "";
 const schemeFromBundleId = `manus${timestamp}`;
 
 const env = {
-  // App branding - update these values directly (do not use env vars)
   appName: "BioSonify",
   appSlug: "image_sonification_biofield_app",
-  // S3 URL of the app logo - set this to the URL returned by generate_image when creating custom logo
-  // Leave empty to use the default icon from assets/images/icon.png
   logoUrl: "https://d2xsxph8kpxj0f.cloudfront.net/310519663694817891/GYJZx67rpY3dpz9mCoUYF8/biosonify-icon-CCZUvbmY5W54g7pykPDq6x.png",
   scheme: schemeFromBundleId,
   iosBundleId: bundleId,
@@ -50,9 +44,9 @@ const config: ExpoConfig = {
   ios: {
     supportsTablet: true,
     bundleIdentifier: env.iosBundleId,
-    "infoPlist": {
-        "ITSAppUsesNonExemptEncryption": false
-      }
+    infoPlist: {
+      ITSAppUsesNonExemptEncryption: false,
+    },
   },
   android: {
     adaptiveIcon: {
@@ -69,12 +63,7 @@ const config: ExpoConfig = {
       {
         action: "VIEW",
         autoVerify: true,
-        data: [
-          {
-            scheme: env.scheme,
-            host: "*",
-          },
-        ],
+        data: [{ scheme: env.scheme, host: "*" }],
         category: ["BROWSABLE", "DEFAULT"],
       },
     ],
@@ -89,15 +78,13 @@ const config: ExpoConfig = {
     [
       "expo-image-picker",
       {
-        "photosPermission": "Allow BioSonify to access your photos to sonify images.",
-        "cameraPermission": "Allow BioSonify to use the camera to capture images for sonification."
-      }
+        photosPermission: "Allow BioSonify to access your photos to sonify images.",
+        cameraPermission: "Allow BioSonify to use the camera to capture images for sonification.",
+      },
     ],
     [
       "expo-audio",
-      {
-        microphonePermission: "Allow $(PRODUCT_NAME) to access your microphone.",
-      },
+      { microphonePermission: "Allow $(PRODUCT_NAME) to access your microphone." },
     ],
     [
       "expo-video",
@@ -113,24 +100,24 @@ const config: ExpoConfig = {
         imageWidth: 200,
         resizeMode: "contain",
         backgroundColor: "#ffffff",
-        dark: {
-          backgroundColor: "#000000",
-        },
+        dark: { backgroundColor: "#000000" },
       },
     ],
     [
       "expo-media-library",
       {
-        "photosPermission": "Allow BioSonify to save audio files to your music library.",
-        "savePhotosPermission": "Allow BioSonify to save audio files to your device.",
-        "isAccessMediaLocationEnabled": true
-      }
+        photosPermission: "Allow BioSonify to save audio files to your music library.",
+        savePhotosPermission: "Allow BioSonify to save audio files to your device.",
+        isAccessMediaLocationEnabled: true,
+      },
     ],
     [
       "expo-build-properties",
       {
         android: {
-          buildArchs: ["armeabi-v7a", "arm64-v8a"],
+          // x86_64 is included so CI can boot/install the exact release APK in
+          // an Android emulator and catch launch-time crashes before delivery.
+          buildArchs: ["armeabi-v7a", "arm64-v8a", "x86_64"],
           minSdkVersion: 24,
         },
       },
@@ -138,7 +125,10 @@ const config: ExpoConfig = {
   ],
   experiments: {
     typedRoutes: true,
-    reactCompiler: true,
+    // Keep the production bundle conservative while we validate Android launch.
+    // The app worked through TypeScript/Gradle but crashed only after loading the
+    // production JS bundle, making compiler transforms a real suspect.
+    reactCompiler: false,
   },
 };
 
