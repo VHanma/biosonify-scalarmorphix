@@ -32,7 +32,6 @@ jobs:
     timeout-minutes: 45
     env:
       CI: '1'
-      NODE_ENV: production
       EXPO_NO_TELEMETRY: '1'
       NODE_OPTIONS: '--max-old-space-size=6144'
 
@@ -62,17 +61,21 @@ jobs:
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
 
-      - name: Install dependencies
+      - name: Install dependencies including dev tooling
         run: pnpm install --no-frozen-lockfile
 
       - name: Type-check baseline
         run: pnpm run check
 
       - name: Generate native Android baseline
+        env:
+          NODE_ENV: production
         run: pnpm exec expo prebuild --platform android --clean
 
       - name: Build ARM64 standalone baseline
         working-directory: android
+        env:
+          NODE_ENV: production
         run: |
           chmod +x gradlew
           ./gradlew :app:assembleRelease -PreactNativeArchitectures=arm64-v8a --no-daemon --stacktrace
@@ -103,7 +106,6 @@ jobs:
     timeout-minutes: 45
     env:
       CI: '1'
-      NODE_ENV: production
       EXPO_NO_TELEMETRY: '1'
       NODE_OPTIONS: '--max-old-space-size=6144'
 
@@ -152,17 +154,21 @@ jobs:
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
 
-      - name: Install dependencies
+      - name: Install dependencies including dev tooling
         run: pnpm install --no-frozen-lockfile
 
       - name: Type-check safe-boot source
         run: pnpm run check
 
       - name: Generate native Android safe-boot
+        env:
+          NODE_ENV: production
         run: pnpm exec expo prebuild --platform android --clean
 
       - name: Build ARM64 standalone safe-boot
         working-directory: android
+        env:
+          NODE_ENV: production
         run: |
           chmod +x gradlew
           ./gradlew :app:assembleRelease -PreactNativeArchitectures=arm64-v8a --no-daemon --stacktrace
